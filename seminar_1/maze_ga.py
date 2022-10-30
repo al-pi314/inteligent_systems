@@ -9,6 +9,13 @@ import pygad
 RANDOM_SEED = 100
 MAZE = None
 MAZE_START = None
+SCORING_FACTOR = 1
+
+# factor to use for penalties & rewards
+FINISHING_MOVE = 1
+TREASURE_MOVE = 0.1
+INVALID_MOVE = 0.01
+STARTING_SCORE = -0.1
 
 # two-way encoding mappings
 encoding = {
@@ -31,7 +38,7 @@ directions_reverse = {v: k for k, v in directions.items()}
 
 def encode_maze(s):
     # sets global variables of MAZE and MAZE_START based on encoding values
-    global MAZE, MAZE_START
+    global MAZE, MAZE_START, SCORING_FACTOR
 
     rows = s.split("\n")
     MAZE = np.zeros((len(rows), len(rows[0])))
@@ -41,6 +48,8 @@ def encode_maze(s):
             MAZE[i, j] = encoding[val]
             if val == "S":
                 MAZE_START = [j, i]
+
+    SCORING_FACTOR = (MAZE.size / 100)
 
 
 def move(p, n_curr):
@@ -59,42 +68,42 @@ def move(p, n_curr):
     # checks
     # out of bounds
     if n_curr[0] < 0 or n_curr[0] >= columns or n_curr[1] < 0 or n_curr[1]  >= rows:
-        return -1
+        return False
     # in wall
     elif MAZE[n_curr[1], n_curr[0]] == encoding["#"]:
-        return -1
+        return False
     # valid move
-    return 0
+    return True
 
 
 def fitness(path, solution_idx):
-    score = -5
     moves_cnt = 0
     # set of collected threasure points to prevent collecting the same threasure twice
     collected_threasures = set()
 
     curr = MAZE_START
+    score = STARTING_SCORE * SCORING_FACTOR
     for p in path:
         moves_cnt += 1
         
         # check if the move is valid and if any score adjustment is required
         n_curr = curr[:]
-        score_adjustment = move(p, n_curr)
-        if score_adjustment == 0:
+        is_valid = move(p, n_curr)
+        if is_valid:
             # move was valid -> update current position
             curr = n_curr
         else:
             # move was invalid -> adjust score
-            score += score_adjustment
+            score -= INVALID_MOVE * SCORING_FACTOR
 
         # algorithem found treasure
         if (curr[0], curr[1]) not in collected_threasures and MAZE[curr[1], curr[0]] == encoding["T"]:
-            score += 10
+            score += TREASURE_MOVE * SCORING_FACTOR
             collected_threasures.add((curr[0], curr[1]))
 
         # algorithem found finish
         if MAZE[curr[1], curr[0]] == encoding["E"]:
-            score += 100
+            score += FINISHING_MOVE * SCORING_FACTOR
             # stop after encountering the finish
             break
         
@@ -126,9 +135,9 @@ def show_solution(path):
         print(" ", end="")
         # check for wall collisions and other invalid moves
         n_curr = curr[:]
-        sa = move(p, n_curr)
-        # the move was not invalid -> update current position
-        if sa == 0:
+        is_valid = move(p, n_curr)
+        # the move was valid -> update current position
+        if is_valid:
             curr = n_curr
             visited.add((n_curr[0], n_curr[1]))
             
@@ -175,7 +184,7 @@ if __name__ == "__main__":
         # agent evaluation
         mutation_probability=0.2,
         fitness_func=fitness,
-        keep_elitism=2, # keep best n solutions in the next generation
+        # keep_elitism=2, # keep best n solutions in the next generation
 
         # agent gene type
         gene_type=int,
