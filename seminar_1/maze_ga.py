@@ -1,7 +1,7 @@
 
 
-from random import choices, seed
-
+from random import choice, seed
+from sys import argv
 import numpy as np
 import pygad
 
@@ -22,11 +22,10 @@ encoding_reverse = {v: k for k, v in encoding.items()}
 
 # two-way direction mappings
 directions = {
-    "S": 0,
-    "L": 1,
-    "R": 2,
-    "U": 3,
-    "D": 4
+    "L": 0,
+    "R": 1,
+    "U": 2,
+    "D": 3
 }
 directions_reverse = {v: k for k, v in directions.items()}
 
@@ -75,12 +74,8 @@ def fitness(path, solution_idx):
     collected_threasures = set()
 
     curr = MAZE_START
-    finish_reached = False
     for p in path:
         moves_cnt += 1
-        # agent decided to stop
-        if p == directions["S"]:
-            break
         
         # check if the move is valid and if any score adjustment is required
         n_curr = curr[:]
@@ -98,25 +93,25 @@ def fitness(path, solution_idx):
             collected_threasures.add((curr[0], curr[1]))
 
         # algorithem found finish
-        if not finish_reached and MAZE[curr[1], curr[0]] == encoding["E"]:
-            finish_reached = True
+        if MAZE[curr[1], curr[0]] == encoding["E"]:
             score += 100
+            # stop after encountering the finish
+            break
         
     # penalise making more steps
     return score / max(1, moves_cnt)
 
 def new_agent():
     # generate new agent (genes are selected with probability distribution)
-    active_moves = sorted(list(directions.values()))
-    weights = [0.03] + [0.2425 for _ in range(len(directions) -1)]
-    return choices(active_moves, weights, k=MAZE.size)
+    values = list(directions.values())
+    rows, columns = MAZE.shape
+    return [choice(values) for _ in range((rows - 1) * (columns - 1)  + 1)]
 
 def generate_population(n):
     # generate population of size 'n'
     pop = []
     for _ in range(n):
-        na = new_agent()
-        pop.append(na)
+        pop.append(new_agent())
     return pop
 
 def show_solution(path):
@@ -136,6 +131,10 @@ def show_solution(path):
         if sa == 0:
             curr = n_curr
             visited.add((n_curr[0], n_curr[1]))
+            
+            # finish reached
+            if MAZE[curr[0], curr[1]] == encoding["E"]:
+                break
     print()
 
     # display maze with visited points marked with 'x'
@@ -150,34 +149,38 @@ def show_solution(path):
     print()
 
 if __name__ == "__main__":
+    maze_file = "./mazes/maze_treasure_2.txt"
+    if len(argv) > 1:
+        maze_file = argv[1]
+
     # initalize random numbers generator
     seed(RANDOM_SEED)
     # read variables MAZE and MAZE_START from file
-    encode_maze(open("./mazes/maze_treasure_2.txt", "r").read())
+    encode_maze(open(maze_file, "r").read())
 
     # initialize population
-    initial_population = np.array(generate_population(300))
+    initial_population = np.array(generate_population(200))
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=150,
-        num_parents_mating=30,
-        K_tournament=10,
+        num_generations=100,
+        num_parents_mating=10,
+        K_tournament=5,
 
         # initial population
         initial_population=initial_population,
 
         # agent evaluation
-        mutation_probability=0.4,
+        mutation_probability=0.2,
         fitness_func=fitness,
-        keep_elitism=5, # keep best n solutions in the next generation
+        keep_elitism=2, # keep best n solutions in the next generation
 
         # agent gene type
         gene_type=int,
         init_range_low=0, # lowest valid value for gene (inclusive)
-        init_range_high=5, # highest valid value for gene (exclusive)
+        init_range_high=4, # highest valid value for gene (exclusive)
 
         # computation
         parallel_processing=['thread', 4] 
