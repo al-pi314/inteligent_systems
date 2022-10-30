@@ -1,6 +1,6 @@
 
 
-from random import choice, seed
+from random import choice, seed, random
 from sys import argv
 import numpy as np
 import pygad
@@ -13,7 +13,7 @@ SCORING_FACTOR = 1
 
 # factor to use for penalties & rewards
 FINISHING_MOVE = 1
-TREASURE_MOVE = 0.1
+TREASURE_MOVE = 1
 INVALID_MOVE = 0.01
 STARTING_SCORE = -0.1
 
@@ -139,10 +139,10 @@ def show_solution(path):
         # the move was valid -> update current position
         if is_valid:
             curr = n_curr
-            visited.add((n_curr[0], n_curr[1]))
+            visited.add((curr[0], curr[1]))
             
             # finish reached
-            if MAZE[curr[0], curr[1]] == encoding["E"]:
+            if MAZE[curr[1], curr[0]] == encoding["E"]:
                 break
     print()
 
@@ -156,6 +156,27 @@ def show_solution(path):
                 print(encoding_reverse[MAZE[i, j]], end="")
         print()
     print()
+
+def offspring_mutation(offspring, ga_instance):
+    genes_to_mutate = [random() <= ga_instance.mutation_probability for _ in range(len(offspring))]
+
+    curr = MAZE_START
+    for i in range(len(offspring)):
+        n_curr = curr[:]
+        if genes_to_mutate[i]:
+            valid_moves = [m for m in directions.values() if move(m, n_curr)]
+            offspring[i] = choice(valid_moves)
+
+        is_valid = move(offspring[i], n_curr)
+        if is_valid:
+            curr = n_curr
+    return offspring
+
+def mutation(offspring, ga_instance):
+    new_offspring = []
+    for o in offspring:
+        new_offspring.append(offspring_mutation(o, ga_instance))
+    return new_offspring
 
 if __name__ == "__main__":
     maze_file = "./mazes/maze_treasure_2.txt"
@@ -174,9 +195,9 @@ if __name__ == "__main__":
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=100,
-        num_parents_mating=10,
-        K_tournament=5,
+        num_generations=200,
+        num_parents_mating=20,
+        K_tournament=10,
 
         # initial population
         initial_population=initial_population,
@@ -184,15 +205,18 @@ if __name__ == "__main__":
         # agent evaluation
         mutation_probability=0.2,
         fitness_func=fitness,
-        # keep_elitism=2, # keep best n solutions in the next generation
+        keep_elitism=5, # keep best n solutions in the next generation
 
         # agent gene type
         gene_type=int,
         init_range_low=0, # lowest valid value for gene (inclusive)
         init_range_high=4, # highest valid value for gene (exclusive)
 
+        # custom functions
+        mutation_type=mutation,
+
         # computation
-        parallel_processing=['thread', 4] 
+        parallel_processing=['thread', 5] 
     )
 
     # run multiple tournaments and generations to find the best solution
