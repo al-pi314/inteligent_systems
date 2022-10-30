@@ -114,7 +114,7 @@ def new_agent():
     # generate new agent (genes are selected with probability distribution)
     values = list(directions.values())
     rows, columns = MAZE.shape
-    return [choice(values) for _ in range((rows - 1) * (columns - 1)  + 1)]
+    return [choice(values) for _ in range(rows  * columns)]
 
 def generate_population(n):
     # generate population of size 'n'
@@ -213,14 +213,14 @@ if __name__ == "__main__":
     encode_maze(open(maze_file, "r").read())
 
     # initialize population
-    initial_population = np.array(generate_population(200))
+    initial_population = np.array(generate_population(300))
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=100,
-        num_parents_mating=10,
+        num_generations=150,
+        num_parents_mating=30,
         K_tournament=10,
 
         # initial population
@@ -232,8 +232,8 @@ if __name__ == "__main__":
         init_range_high=4, # highest valid value for gene (exclusive)
 
         # agent evaluation
-        mutation_probability=0.2,
-        keep_elitism=2, # keep best n solutions in the next generation
+        mutation_probability=0.3,
+        keep_elitism=10, # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
