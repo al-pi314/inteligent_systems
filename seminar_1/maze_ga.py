@@ -157,7 +157,7 @@ def show_solution(path):
         print()
     print()
 
-def offspring_mutation(offspring, ga_instance):
+def instance_mutation(offspring, ga_instance):
     genes_to_mutate = [random() <= ga_instance.mutation_probability for _ in range(len(offspring))]
 
     curr = MAZE_START
@@ -175,8 +175,32 @@ def offspring_mutation(offspring, ga_instance):
 def mutation(offspring, ga_instance):
     new_offspring = []
     for o in offspring:
-        new_offspring.append(offspring_mutation(o, ga_instance))
+        new_offspring.append(instance_mutation(o, ga_instance))
     return new_offspring
+
+def instance_crossover(A, B):
+    suboptimal_moves = []
+    curr = MAZE_START
+    for i in range(len(A)):
+        n_curr = curr[:]
+        is_valid = move(A[i], n_curr)
+        if is_valid:
+            curr = n_curr
+        else:
+            suboptimal_moves.append(i)
+    if len(suboptimal_moves) == 0:
+        return A
+
+    swap_idx = choice(suboptimal_moves)
+    return np.concatenate((A[:swap_idx], B[swap_idx:]))
+
+def crossover(parents, offspring_size, ga_instance):
+    offspring = np.empty(shape=offspring_size)
+
+    for i in range(offspring_size[0]):
+        child = instance_crossover(choice(parents), choice(parents))
+        offspring[i] = child
+    return offspring
 
 if __name__ == "__main__":
     maze_file = "./mazes/maze_treasure_2.txt"
@@ -195,25 +219,26 @@ if __name__ == "__main__":
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=200,
-        num_parents_mating=20,
+        num_generations=100,
+        num_parents_mating=10,
         K_tournament=10,
 
         # initial population
         initial_population=initial_population,
-
-        # agent evaluation
-        mutation_probability=0.2,
-        fitness_func=fitness,
-        keep_elitism=5, # keep best n solutions in the next generation
 
         # agent gene type
         gene_type=int,
         init_range_low=0, # lowest valid value for gene (inclusive)
         init_range_high=4, # highest valid value for gene (exclusive)
 
+        # agent evaluation
+        mutation_probability=0.2,
+        keep_elitism=2, # keep best n solutions in the next generation
+
         # custom functions
+        fitness_func=fitness,
         mutation_type=mutation,
+        crossover_type=crossover,
 
         # computation
         parallel_processing=['thread', 5] 
