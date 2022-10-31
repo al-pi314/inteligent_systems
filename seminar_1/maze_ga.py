@@ -1,10 +1,10 @@
 
 
-from operator import is_
-from random import choice, seed, random
+from random import choice, seed, random, randint
 from sys import argv
 import numpy as np
 import pygad
+from time import sleep
 
 # global variables
 RANDOM_SEED = 100
@@ -14,12 +14,13 @@ SCORING_FACTOR = 1
 TREASURES = 0
 
 # factor to use for penalties & rewards
-STARTING_SCORE = 0.1
-FINISHING_MOVE = 1
-TREASURE_MOVE = 7
-INVALID_MOVE = 0.01
-REPEATING_MOVE = 0.01
-MOVE_PENALTY = 0.001
+FNIISH_REWARD = 1
+TREASURE_REWARD = 100
+VALID_MOVE_REWARD = 0.001
+VALID_MOVE_FACTOR = 0.1
+
+# display settings
+SHOW_EVERY_N_GENS = 20
 
 # two-way encoding mappings
 encoding = {
@@ -86,43 +87,40 @@ def move(p, curr):
 def fitness(path, solution_idx):
     # set of collected threasure points to prevent collecting the same threasure twice
     visited = {}
+    moves = 0
+    free_moves = 0
 
     curr = MAZE_START
-    score = - STARTING_SCORE * SCORING_FACTOR
-    for p in path:        
+    score = 1
+    for p in path:
+        moves += 1
+
         # check if the move is valid and if any score adjustment is required
         curr, is_valid = move(p, curr)
-        if not is_valid:
-            # move was invalid -> adjust score
-            score -= INVALID_MOVE * SCORING_FACTOR
-
+            
         # get current number of visits
         num_visits = visited.get((curr[0], curr[1]), 0)
 
         # algorithem found treasure
         if num_visits == 0 and MAZE[curr[1], curr[0]] == encoding["T"]:
-            score += TREASURE_MOVE * SCORING_FACTOR
+            score += TREASURE_REWARD
+            free_moves += MAZE.size * 0.1
 
         # algorithem found finish
         if MAZE[curr[1], curr[0]] == encoding["E"]:
-            score += FINISHING_MOVE * SCORING_FACTOR
+            score += FNIISH_REWARD
             # stop after encountering the finish
             break
         
-        # punish repeating moves
-        if num_visits > TREASURES:
-            repeated_moves = num_visits - TREASURES
-            score -= (REPEATING_MOVE * repeated_moves) * SCORING_FACTOR
-        
+
         if is_valid:
+            score += (VALID_MOVE_REWARD * (VALID_MOVE_FACTOR **  (num_visits +1)))
+
             # increase visited counter
             visited[(curr[0], curr[1])] = num_visits + 1
-
-        # punish making more moves
-        score -= MOVE_PENALTY * SCORING_FACTOR
         
     # penalise making more steps
-    return score
+    return score /  max(1, moves - free_moves)
 
 def new_agent():
     # generate new agent
@@ -157,9 +155,12 @@ def generate_valid_population(n):
     return pop
 
 
-def show_solution(path):
+def show_solution(path, solution_fitness, sequential_display=False):
+    print("-----------------------------------")
+    print("Current score {}".format(solution_fitness))
+
     # cordinates on the path
-    visited = set()
+    visited = []
     # current position
     curr = MAZE_START
 
@@ -171,13 +172,26 @@ def show_solution(path):
         curr, is_valid = move(p, curr)
         # the move was valid -> update current position
         if is_valid:
-            visited.add((curr[0], curr[1]))
+            visited.append((curr[0], curr[1]))
             
             # finish reached
             if MAZE[curr[1], curr[0]] == encoding["E"]:
                 break
     print()
 
+    # display maze with final solution
+    display_maze(set(visited))
+
+    # display maze move by move
+    if sequential_display:
+        sequential_visited = set()
+        for v in visited:
+            sequential_visited.add(v)
+            display_maze(sequential_visited)
+            sleep(1)
+    print()
+
+def display_maze(visited):
     # display maze with visited points marked with 'x'
     rows, columns = MAZE.shape
     for i in range(rows):
@@ -187,7 +201,6 @@ def show_solution(path):
             else:
                 print(encoding_reverse[MAZE[i, j]], end="")
         print()
-    print()
 
 def instance_mutation(offspring, ga_instance):
     genes_to_mutate = [random() <= ga_instance.mutation_probability for _ in range(len(offspring))]
@@ -200,6 +213,7 @@ def instance_mutation(offspring, ga_instance):
 
         curr, _ = move(offspring[i], curr)
     return offspring
+
 
 def mutation(offspring, ga_instance):
     new_offspring = []
@@ -214,10 +228,10 @@ def instance_crossover(A, B):
         curr, is_valid = move(A[i], curr)
         if not is_valid:
             suboptimal_moves.append(i)
-    if len(suboptimal_moves) == 0:
-        return A
 
-    swap_idx = choice(suboptimal_moves)
+    swap_idx = randint(0, len(A))
+    if len(suboptimal_moves) != 0:
+        swap_idx = choice(suboptimal_moves)
     return np.concatenate((A[:swap_idx], B[swap_idx:]))
 
 def crossover(parents, offspring_size, ga_instance):
@@ -229,11 +243,9 @@ def crossover(parents, offspring_size, ga_instance):
     return offspring
 
 def on_generation(ga_instance):
-    if ga_instance.generations_completed % int(ga_instance.num_generations / 5) == 0:
+    if ga_instance.generations_completed % SHOW_EVERY_N_GENS == 0:
         solution, solution_fitness, _ = ga_instance.best_solution()
-        print("-----------------------------------")
-        print("Current score {}".format(solution_fitness))
-        show_solution(solution)
+        show_solution(solution, solution_fitness)
 
 if __name__ == "__main__":
     maze_file = "./mazes/maze_treasure_2.txt"
@@ -246,7 +258,7 @@ if __name__ == "__main__":
     encode_maze(open(maze_file, "r").read())
 
     # initialize population
-    initial_population = np.array(generate_valid_population(150))
+    initial_population = np.array(generate_valid_population(200))
     # show_solution(initial_population[0])
 
     # setup ga algorithem
@@ -254,7 +266,7 @@ if __name__ == "__main__":
         # main settings
         random_seed=RANDOM_SEED,
         num_generations=200,
-        num_parents_mating=50,
+        num_parents_mating=150,
         K_tournament=5,
 
         # initial population
@@ -267,7 +279,7 @@ if __name__ == "__main__":
 
         # agent evaluation
         mutation_probability=0.3,
-        # keep_elitism=2, # keep best n solutions in the next generation
+        keep_elitism=1, # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
@@ -276,13 +288,13 @@ if __name__ == "__main__":
         on_generation=on_generation,
 
         # computation
-        parallel_processing=['thread', 8] 
+        parallel_processing=['thread', 16] 
     )
 
     # run multiple tournaments and generations to find the best solution
     ga.run()
 
     # read & display best solution
-    solution, _, _ = ga.best_solution()
-    show_solution(solution)
+    solution, solution_fitness, _ = ga.best_solution()
+    show_solution(solution, solution_fitness, sequential_display=True)
     
