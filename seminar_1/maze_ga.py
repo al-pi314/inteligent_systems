@@ -1,5 +1,6 @@
 
 
+from operator import is_
 from random import choice, seed, random
 from sys import argv
 import numpy as np
@@ -10,12 +11,15 @@ RANDOM_SEED = 100
 MAZE = None
 MAZE_START = None
 SCORING_FACTOR = 1
+TREASURES = 0
 
 # factor to use for penalties & rewards
+STARTING_SCORE = 0.1
 FINISHING_MOVE = 1
-TREASURE_MOVE = 1
+TREASURE_MOVE = 7
 INVALID_MOVE = 0.01
-STARTING_SCORE = -0.1
+REPEATING_MOVE = 0.01
+MOVE_PENALTY = 0.001
 
 # two-way encoding mappings
 encoding = {
@@ -38,7 +42,7 @@ directions_reverse = {v: k for k, v in directions.items()}
 
 def encode_maze(s):
     # sets global variables of MAZE and MAZE_START based on encoding values
-    global MAZE, MAZE_START, SCORING_FACTOR
+    global MAZE, MAZE_START, SCORING_FACTOR, TREASURES
 
     rows = s.split("\n")
     MAZE = np.zeros((len(rows), len(rows[0])))
@@ -48,13 +52,16 @@ def encode_maze(s):
             MAZE[i, j] = encoding[val]
             if val == "S":
                 MAZE_START = [j, i]
+            if val == "T":
+                TREASURES += 1
 
     SCORING_FACTOR = (MAZE.size / 100)
 
 
-def move(p, n_curr):
+def move(p, curr):
     rows, columns = MAZE.shape
-    
+    n_curr = curr[:]
+
     # move
     if p == directions["L"]:
         n_curr[0] -= 1
@@ -68,38 +75,33 @@ def move(p, n_curr):
     # checks
     # out of bounds
     if n_curr[0] < 0 or n_curr[0] >= columns or n_curr[1] < 0 or n_curr[1]  >= rows:
-        return False
+        return curr, False
     # in wall
     elif MAZE[n_curr[1], n_curr[0]] == encoding["#"]:
-        return False
+        return curr, False
     # valid move
-    return True
+    return n_curr, True
 
 
 def fitness(path, solution_idx):
-    moves_cnt = 0
     # set of collected threasure points to prevent collecting the same threasure twice
-    collected_threasures = set()
+    visited = {}
 
     curr = MAZE_START
-    score = STARTING_SCORE * SCORING_FACTOR
-    for p in path:
-        moves_cnt += 1
-        
+    score = - STARTING_SCORE * SCORING_FACTOR
+    for p in path:        
         # check if the move is valid and if any score adjustment is required
-        n_curr = curr[:]
-        is_valid = move(p, n_curr)
-        if is_valid:
-            # move was valid -> update current position
-            curr = n_curr
-        else:
+        curr, is_valid = move(p, curr)
+        if not is_valid:
             # move was invalid -> adjust score
             score -= INVALID_MOVE * SCORING_FACTOR
 
+        # get current number of visits
+        num_visits = visited.get((curr[0], curr[1]), 0)
+
         # algorithem found treasure
-        if (curr[0], curr[1]) not in collected_threasures and MAZE[curr[1], curr[0]] == encoding["T"]:
+        if num_visits == 0 and MAZE[curr[1], curr[0]] == encoding["T"]:
             score += TREASURE_MOVE * SCORING_FACTOR
-            collected_threasures.add((curr[0], curr[1]))
 
         # algorithem found finish
         if MAZE[curr[1], curr[0]] == encoding["E"]:
@@ -107,11 +109,23 @@ def fitness(path, solution_idx):
             # stop after encountering the finish
             break
         
+        # punish repeating moves
+        if num_visits > TREASURES:
+            repeated_moves = num_visits - TREASURES
+            score -= (REPEATING_MOVE * repeated_moves) * SCORING_FACTOR
+        
+        if is_valid:
+            # increase visited counter
+            visited[(curr[0], curr[1])] = num_visits + 1
+
+        # punish making more moves
+        score -= MOVE_PENALTY * SCORING_FACTOR
+        
     # penalise making more steps
-    return score / max(1, moves_cnt)
+    return score
 
 def new_agent():
-    # generate new agent (genes are selected with probability distribution)
+    # generate new agent
     values = list(directions.values())
     rows, columns = MAZE.shape
     return [choice(values) for _ in range(rows  * columns)]
@@ -122,6 +136,26 @@ def generate_population(n):
     for _ in range(n):
         pop.append(new_agent())
     return pop
+
+def new_valid_agent():
+    values = list(directions.values())
+    rows, columns = MAZE.shape
+    agent = []
+    curr = MAZE_START
+    for _ in range(rows  * columns):
+        valid_moves = [m for m in values if move(m, curr)[1]]
+        agent.append(choice(valid_moves))
+
+        curr, _ = move(agent[-1], curr)
+    return agent
+
+def generate_valid_population(n):
+    # generates valid population of size 'n'
+    pop = []
+    for _ in range(n):
+        pop.append(new_valid_agent())
+    return pop
+
 
 def show_solution(path):
     # cordinates on the path
@@ -134,11 +168,9 @@ def show_solution(path):
         print(directions_reverse[p], end="")
         print(" ", end="")
         # check for wall collisions and other invalid moves
-        n_curr = curr[:]
-        is_valid = move(p, n_curr)
+        curr, is_valid = move(p, curr)
         # the move was valid -> update current position
         if is_valid:
-            curr = n_curr
             visited.add((curr[0], curr[1]))
             
             # finish reached
@@ -162,14 +194,11 @@ def instance_mutation(offspring, ga_instance):
 
     curr = MAZE_START
     for i in range(len(offspring)):
-        n_curr = curr[:]
         if genes_to_mutate[i]:
-            valid_moves = [m for m in directions.values() if move(m, n_curr)]
+            valid_moves = [m for m in directions.values() if move(m, curr)[1]]
             offspring[i] = choice(valid_moves)
 
-        is_valid = move(offspring[i], n_curr)
-        if is_valid:
-            curr = n_curr
+        curr, _ = move(offspring[i], curr)
     return offspring
 
 def mutation(offspring, ga_instance):
@@ -182,11 +211,8 @@ def instance_crossover(A, B):
     suboptimal_moves = []
     curr = MAZE_START
     for i in range(len(A)):
-        n_curr = curr[:]
-        is_valid = move(A[i], n_curr)
-        if is_valid:
-            curr = n_curr
-        else:
+        curr, is_valid = move(A[i], curr)
+        if not is_valid:
             suboptimal_moves.append(i)
     if len(suboptimal_moves) == 0:
         return A
@@ -202,6 +228,13 @@ def crossover(parents, offspring_size, ga_instance):
         offspring[i] = child
     return offspring
 
+def on_generation(ga_instance):
+    if ga_instance.generations_completed % int(ga_instance.num_generations / 5) == 0:
+        solution, solution_fitness, _ = ga_instance.best_solution()
+        print("-----------------------------------")
+        print("Current score {}".format(solution_fitness))
+        show_solution(solution)
+
 if __name__ == "__main__":
     maze_file = "./mazes/maze_treasure_2.txt"
     if len(argv) > 1:
@@ -213,15 +246,16 @@ if __name__ == "__main__":
     encode_maze(open(maze_file, "r").read())
 
     # initialize population
-    initial_population = np.array(generate_population(300))
+    initial_population = np.array(generate_valid_population(150))
+    # show_solution(initial_population[0])
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=150,
-        num_parents_mating=30,
-        K_tournament=10,
+        num_generations=200,
+        num_parents_mating=50,
+        K_tournament=5,
 
         # initial population
         initial_population=initial_population,
@@ -233,21 +267,22 @@ if __name__ == "__main__":
 
         # agent evaluation
         mutation_probability=0.3,
-        keep_elitism=10, # keep best n solutions in the next generation
+        # keep_elitism=2, # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
         mutation_type=mutation,
         crossover_type=crossover,
+        on_generation=on_generation,
 
         # computation
-        parallel_processing=['thread', 5] 
+        parallel_processing=['thread', 8] 
     )
 
     # run multiple tournaments and generations to find the best solution
     ga.run()
 
     # read & display best solution
-    solution, solution_fitness, solution_idx = ga.best_solution()
+    solution, _, _ = ga.best_solution()
     show_solution(solution)
     
