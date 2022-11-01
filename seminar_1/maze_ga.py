@@ -203,15 +203,22 @@ def display_maze(visited):
         print()
 
 def instance_mutation(offspring, ga_instance):
+    # mutate genes
     genes_to_mutate = [random() <= ga_instance.mutation_probability for _ in range(len(offspring))]
 
     curr = MAZE_START
     for i in range(len(offspring)):
+        valid_moves = [m for m in directions.values() if move(m, curr)[1]]
+        # mutate direction gene
         if genes_to_mutate[i]:
-            valid_moves = [m for m in directions.values() if move(m, curr)[1]]
             offspring[i] = choice(valid_moves)
 
-        curr, _ = move(offspring[i], curr)
+        curr, is_valid = move(offspring[i], curr)
+        # correct invalid moves (move might be invalid because of previous mutations)
+        if not is_valid:
+            offspring[i] = choice(valid_moves)
+            curr, _ = move(offspring[i], curr)
+
     return offspring
 
 
@@ -221,18 +228,46 @@ def mutation(offspring, ga_instance):
         new_offspring.append(instance_mutation(o, ga_instance))
     return new_offspring
 
-def instance_crossover(A, B):
-    suboptimal_moves = []
+def map_visited_to_indicies(path):
+    # returns all visited cordinates with indicies of when they were visited and last position of the path
     curr = MAZE_START
-    for i in range(len(A)):
-        curr, is_valid = move(A[i], curr)
-        if not is_valid:
-            suboptimal_moves.append(i)
+    curr_tuple = tuple(curr)
+    visited_on_indicies = {
+        curr_tuple: [0]
+    }
+    cordinates = set()
+    cordinates.add(curr_tuple)
+    for i in range(len(path)):
+        curr, _ = move(path[i], curr)
+        curr_tuple = tuple(curr)
+        visited_on_indicies.setdefault(curr_tuple, [])
+        visited_on_indicies[curr_tuple].append(i)
+        cordinates.add(curr_tuple)
+    return visited_on_indicies, cordinates, curr
 
-    swap_idx = randint(0, len(A))
-    if len(suboptimal_moves) != 0:
-        swap_idx = choice(suboptimal_moves)
-    return np.concatenate((A[:swap_idx], B[swap_idx:]))
+def instance_crossover(A, B):
+    A_visited, A_cordinates, _ = map_visited_to_indicies(A)
+    B_visited, B_cordinates, B_last = map_visited_to_indicies(B)
+
+    # find cordinates that both A and B visited (this will be at least the starting cordinate so the intersection is never empty)
+    intersections = A_cordinates.intersection(B_cordinates)
+    selected_inter = choice(list(intersections))
+
+    # choose random index in both paths
+    A_index = choice(A_visited[selected_inter])
+    B_index = choice(B_visited[selected_inter])
+
+    # join A and B at the selected index then make sure that there aren't too many genes
+    offspring = np.concatenate((A[:A_index], B[B_index:]))[:len(A)]
+    
+    # if the offspring has too little genes add some random valid ones
+    curr = B_last
+    for _ in range(len(A) - len(offspring)):
+        valid_moves = [m for m in directions.values() if move(m, curr)[1]]
+        offspring = np.append(offspring, choice(valid_moves))
+        curr, _ = move(offspring[-1], curr)
+
+    return offspring
 
 def crossover(parents, offspring_size, ga_instance):
     offspring = np.empty(shape=offspring_size)
