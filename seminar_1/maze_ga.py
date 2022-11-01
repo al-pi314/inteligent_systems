@@ -15,9 +15,10 @@ TREASURES = 0
 
 # factor to use for penalties & rewards
 FNIISH_REWARD = 1
-TREASURE_REWARD = 100
+TREASURE_REWARD = 1
 VALID_MOVE_REWARD = 0.001
-VALID_MOVE_FACTOR = 0.1
+BONUS_MOVES_REWARD = 0.003
+VALID_MOVE_FACTOR = 0.01
 
 # display settings
 SHOW_EVERY_N_GENS = 20
@@ -87,13 +88,13 @@ def move(p, curr):
 def fitness(path, solution_idx):
     # set of collected threasure points to prevent collecting the same threasure twice
     visited = {}
-    moves = 0
-    free_moves = 0
 
     curr = MAZE_START
     score = 1
-    for p in path:
-        moves += 1
+    prev_pos = None
+    prev_prev_pos = None
+    for i in range(len(path)):
+        p = path[i]
 
         # check if the move is valid and if any score adjustment is required
         curr, is_valid = move(p, curr)
@@ -104,47 +105,42 @@ def fitness(path, solution_idx):
         # algorithem found treasure
         if num_visits == 0 and MAZE[curr[1], curr[0]] == encoding["T"]:
             score += TREASURE_REWARD
-            free_moves += MAZE.size * 0.1
 
         # algorithem found finish
         if MAZE[curr[1], curr[0]] == encoding["E"]:
             score += FNIISH_REWARD
-            # stop after encountering the finish
+            # stop after encountering the finish (count all remaining moves as valid)
+            score += (len(path) - (i + 1)) * BONUS_MOVES_REWARD
             break
         
 
         if is_valid:
-            score += (VALID_MOVE_REWARD * (VALID_MOVE_FACTOR **  (num_visits +1)))
-
+            repeated_move = (prev_prev_pos is not None and tuple(curr) == tuple(prev_prev_pos))
+            if not repeated_move:
+                score += (VALID_MOVE_REWARD * (VALID_MOVE_FACTOR **  (num_visits +1)))
             # increase visited counter
             visited[(curr[0], curr[1])] = num_visits + 1
+
+        prev_prev_pos = prev_pos
+        prev_pos = curr
         
     # penalise making more steps
-    return score /  max(1, moves - free_moves)
-
-def new_agent():
-    # generate new agent
-    values = list(directions.values())
-    rows, columns = MAZE.shape
-    return [choice(values) for _ in range(rows  * columns)]
-
-def generate_population(n):
-    # generate population of size 'n'
-    pop = []
-    for _ in range(n):
-        pop.append(new_agent())
-    return pop
+    return score
 
 def new_valid_agent():
     values = list(directions.values())
     rows, columns = MAZE.shape
     agent = []
+    times_visited = {}
+    scoring = lambda x, direction: (not x[1], times_visited.get(tuple(x[0]), 0), direction) # returns tuple (is_invalid, times_visited)
     curr = MAZE_START
     for _ in range(rows  * columns):
-        valid_moves = [m for m in values if move(m, curr)[1]]
-        agent.append(choice(valid_moves))
+        moves = sorted([scoring(move(m, curr), m) for m in values])
+        agent.append(moves[0][2])
 
         curr, _ = move(agent[-1], curr)
+        curr_tuple = tuple(curr)
+        times_visited[curr_tuple] = times_visited.get(curr_tuple, 0) + 1
     return agent
 
 def generate_valid_population(n):
@@ -182,21 +178,26 @@ def show_solution(path, solution_fitness, sequential_display=False):
     # display maze with final solution
     display_maze(set(visited))
 
+
     # display maze move by move
     if sequential_display:
+        print("--> sequential display:")
         sequential_visited = set()
+        sequential_visited.add(tuple(MAZE_START))
         for v in visited:
             sequential_visited.add(v)
-            display_maze(sequential_visited)
-            sleep(1)
+            display_maze(sequential_visited, current=v)
+            sleep(2)
     print()
 
-def display_maze(visited):
+def display_maze(visited, current=None):
     # display maze with visited points marked with 'x'
     rows, columns = MAZE.shape
     for i in range(rows):
         for j in range(columns):
-            if (j, i) in visited:
+            if current == (j, i):
+                print("o", end="")
+            elif (j, i) in visited:
                 print("x", end="")
             else:
                 print(encoding_reverse[MAZE[i, j]], end="")
@@ -294,14 +295,13 @@ if __name__ == "__main__":
 
     # initialize population
     initial_population = np.array(generate_valid_population(200))
-    # show_solution(initial_population[0])
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
         num_generations=200,
-        num_parents_mating=150,
+        num_parents_mating=75,
         K_tournament=5,
 
         # initial population
@@ -314,7 +314,7 @@ if __name__ == "__main__":
 
         # agent evaluation
         mutation_probability=0.3,
-        keep_elitism=1, # keep best n solutions in the next generation
+        keep_elitism=5, # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
