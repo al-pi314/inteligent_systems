@@ -1,5 +1,6 @@
 
 
+from audioop import mul
 from random import choice, seed, random, randint
 from sys import argv
 import numpy as np
@@ -10,15 +11,14 @@ from time import sleep
 RANDOM_SEED = 100
 MAZE = None
 MAZE_START = None
-SCORING_FACTOR = 1
 TREASURES = 0
 
 # factor to use for penalties & rewards
-FNIISH_REWARD = 1
-TREASURE_REWARD = 1
-VALID_MOVE_REWARD = 0.001
-BONUS_MOVES_REWARD = 0.003
-VALID_MOVE_FACTOR = 0.01
+TREASURE_MULTIPLIER = 1
+UNIQUE_MOVE_REWARD = 1
+REPEATED_MOVE_REWARD = 0.8
+EXPLORATION_REPEATED_MOVE_REWARD = 0.3
+BONUS_MOVE_REWARD = 2
 
 # display settings
 SHOW_EVERY_N_GENS = 20
@@ -44,7 +44,7 @@ directions_reverse = {v: k for k, v in directions.items()}
 
 def encode_maze(s):
     # sets global variables of MAZE and MAZE_START based on encoding values
-    global MAZE, MAZE_START, SCORING_FACTOR, TREASURES
+    global MAZE, MAZE_START, TREASURES, VALID_POINTS
 
     rows = s.split("\n")
     MAZE = np.zeros((len(rows), len(rows[0])))
@@ -56,9 +56,6 @@ def encode_maze(s):
                 MAZE_START = [j, i]
             if val == "T":
                 TREASURES += 1
-
-    SCORING_FACTOR = (MAZE.size / 100)
-
 
 def move(p, curr):
     rows, columns = MAZE.shape
@@ -86,46 +83,47 @@ def move(p, curr):
 
 
 def fitness(path, solution_idx):
-    # set of collected threasure points to prevent collecting the same threasure twice
-    visited = {}
-
     curr = MAZE_START
-    score = 1
-    prev_pos = None
-    prev_prev_pos = None
+    visited = set()
+    visited.add(tuple(curr))
+
+    collected_treasures = 0
+    moves = 0
+    found_finish = False
     for i in range(len(path)):
+        moves += 1
         p = path[i]
 
         # check if the move is valid and if any score adjustment is required
-        curr, is_valid = move(p, curr)
-            
-        # get current number of visits
-        num_visits = visited.get((curr[0], curr[1]), 0)
-
+        curr, _ = move(p, curr)
+        curr_tuple = tuple(curr)
+        
         # algorithem found treasure
-        if num_visits == 0 and MAZE[curr[1], curr[0]] == encoding["T"]:
-            score += TREASURE_REWARD
+        if curr_tuple not in visited and MAZE[curr[1], curr[0]] == encoding["T"]:
+            collected_treasures += 1
 
         # algorithem found finish
         if MAZE[curr[1], curr[0]] == encoding["E"]:
-            score += FNIISH_REWARD
-            # stop after encountering the finish (count all remaining moves as valid)
-            score += (len(path) - (i + 1)) * BONUS_MOVES_REWARD
+            found_finish = True
             break
         
+        visited.add(curr_tuple)
 
-        if is_valid:
-            repeated_move = (prev_prev_pos is not None and tuple(curr) == tuple(prev_prev_pos))
-            if not repeated_move:
-                score += (VALID_MOVE_REWARD * (VALID_MOVE_FACTOR **  (num_visits +1)))
-            # increase visited counter
-            visited[(curr[0], curr[1])] = num_visits + 1
+    # define move counters
+    unique_moves = len(visited)
+    repeated_moves = moves - unique_moves
+    remaining_moves = len(path) - moves
 
-        prev_prev_pos = prev_pos
-        prev_pos = curr
-        
-    # penalise making more steps
-    return score
+    # encurage exploration
+    score = unique_moves * UNIQUE_MOVE_REWARD + repeated_moves * EXPLORATION_REPEATED_MOVE_REWARD
+
+    # if the maze was solved with all treasures collected
+    if found_finish and collected_treasures == TREASURES:
+        # we encurage making unique moves, but don't punish repeated ones too much, we also highly encurage using as little moves as possible using bonus reward
+        score = unique_moves * UNIQUE_MOVE_REWARD + repeated_moves * REPEATED_MOVE_REWARD + remaining_moves * BONUS_MOVE_REWARD
+
+    # encurage finding treasures with a multipiler
+    return score * (1 + collected_treasures)
 
 def new_valid_agent():
     values = list(directions.values())
@@ -301,8 +299,8 @@ if __name__ == "__main__":
         # main settings
         random_seed=RANDOM_SEED,
         num_generations=200,
-        num_parents_mating=75,
-        K_tournament=5,
+        num_parents_mating=20,
+        parent_selection_type="sus",
 
         # initial population
         initial_population=initial_population,
@@ -313,8 +311,8 @@ if __name__ == "__main__":
         init_range_high=4, # highest valid value for gene (exclusive)
 
         # agent evaluation
-        mutation_probability=0.3,
-        keep_elitism=5, # keep best n solutions in the next generation
+        mutation_probability=0.1,
+        keep_elitism=1, # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
