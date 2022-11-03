@@ -1,11 +1,11 @@
 
 
-from audioop import mul
-from random import choice, seed, random, randint
+from random import choice, random, seed
 from sys import argv
+from time import sleep
+
 import numpy as np
 import pygad
-from time import sleep
 
 # global variables
 RANDOM_SEED = 100
@@ -14,10 +14,10 @@ MAZE_START = None
 TREASURES = 0
 
 # factor to use for penalties & rewards
-TREASURE_MULTIPLIER = 1
+TREASURE_MULTIPLIER = 2
+FINISH_MULTPILER = 1
 UNIQUE_MOVE_REWARD = 1
-REPEATED_MOVE_REWARD = 0.8
-EXPLORATION_REPEATED_MOVE_REWARD = 0.3
+REPEATED_MOVE_REWARD = 0.9
 BONUS_MOVE_REWARD = 2
 
 # display settings
@@ -88,6 +88,7 @@ def fitness(path, solution_idx):
     visited.add(tuple(curr))
 
     collected_treasures = 0
+    multiplier = 1
     moves = 0
     found_finish = False
     for i in range(len(path)):
@@ -101,10 +102,12 @@ def fitness(path, solution_idx):
         # algorithem found treasure
         if curr_tuple not in visited and MAZE[curr[1], curr[0]] == encoding["T"]:
             collected_treasures += 1
+            multiplier += TREASURE_MULTIPLIER
 
         # algorithem found finish
         if MAZE[curr[1], curr[0]] == encoding["E"]:
             found_finish = True
+            multiplier += FINISH_MULTPILER
             break
         
         visited.add(curr_tuple)
@@ -112,10 +115,10 @@ def fitness(path, solution_idx):
     # define move counters
     unique_moves = len(visited)
     repeated_moves = moves - unique_moves
-    remaining_moves = len(path) - moves
+    remaining_moves = len(path) - moves    
 
     # encurage exploration
-    score = unique_moves * UNIQUE_MOVE_REWARD + repeated_moves * EXPLORATION_REPEATED_MOVE_REWARD
+    score = unique_moves * UNIQUE_MOVE_REWARD
 
     # if the maze was solved with all treasures collected
     if found_finish and collected_treasures == TREASURES:
@@ -123,7 +126,7 @@ def fitness(path, solution_idx):
         score = unique_moves * UNIQUE_MOVE_REWARD + repeated_moves * REPEATED_MOVE_REWARD + remaining_moves * BONUS_MOVE_REWARD
 
     # encurage finding treasures with a multipiler
-    return score * (1 + collected_treasures)
+    return score * multiplier
 
 def new_valid_agent():
     values = list(directions.values())
@@ -292,14 +295,14 @@ if __name__ == "__main__":
     encode_maze(open(maze_file, "r").read())
 
     # initialize population
-    initial_population = np.array(generate_valid_population(200))
+    initial_population = np.array(generate_valid_population(100))
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=200,
-        num_parents_mating=20,
+        num_generations=500,
+        num_parents_mating=5,
         parent_selection_type="sus",
 
         # initial population
