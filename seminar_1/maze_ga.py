@@ -243,7 +243,7 @@ def map_visited_to_indicies(path):
         curr, _ = move(path[i], curr)
         curr_tuple = tuple(curr)
         visited_on_indicies.setdefault(curr_tuple, [])
-        visited_on_indicies[curr_tuple].append(i)
+        visited_on_indicies[curr_tuple].append(i + 1)
         cordinates.add(curr_tuple)
     return visited_on_indicies, cordinates, curr
 
@@ -295,14 +295,14 @@ if __name__ == "__main__":
     encode_maze(open(maze_file, "r").read())
 
     # initialize population
-    initial_population = np.array(generate_valid_population(100))
+    initial_population = np.array(generate_valid_population(80))
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
         num_generations=500,
-        num_parents_mating=5,
+        num_parents_mating=8,
         parent_selection_type="sus",
 
         # initial population
