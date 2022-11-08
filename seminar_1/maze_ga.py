@@ -1,6 +1,6 @@
 
 
-from random import choice, random, seed
+from random import choice, choices, random, seed
 from sys import argv
 from time import sleep
 
@@ -128,6 +128,7 @@ def fitness(path, solution_idx):
     # encurage finding treasures with a multipiler
     return score * multiplier
 
+
 def new_valid_agent():
     values = list(directions.values())
     rows, columns = MAZE.shape
@@ -149,6 +150,17 @@ def generate_valid_population(n):
     pop = []
     for _ in range(n):
         pop.append(new_valid_agent())
+    return pop
+
+def new_agent():
+    values = list(directions.values())
+    return choices(values, k=len(MAZE.size))
+
+def generate_population(n):
+    # generates population of size 'n'
+    pop = []
+    for _ in range(n):
+        pop.append(new_agent())
     return pop
 
 
@@ -203,6 +215,7 @@ def display_maze(visited, current=None):
             else:
                 print(encoding_reverse[MAZE[i, j]], end="")
         print()
+
 
 def instance_mutation(offspring, ga_instance):
     # mutate genes
@@ -284,25 +297,16 @@ def on_generation(ga_instance):
         solution, solution_fitness, _ = ga_instance.best_solution()
         show_solution(solution, solution_fitness)
 
-if __name__ == "__main__":
-    maze_file = "./mazes/maze_treasure_2.txt"
-    if len(argv) > 1:
-        maze_file = argv[1]
-
-    # initalize random numbers generator
-    seed(RANDOM_SEED)
-    # read variables MAZE and MAZE_START from file
-    encode_maze(open(maze_file, "r").read())
-
+def run_ga(generations, population_func, population_size, parents, mutation_probability, elitism, mutation_func, crossover_func, display):
     # initialize population
-    initial_population = np.array(generate_valid_population(80))
+    initial_population = np.array(population_func(population_size))
 
     # setup ga algorithem
     ga = pygad.GA(
         # main settings
         random_seed=RANDOM_SEED,
-        num_generations=500,
-        num_parents_mating=8,
+        num_generations=generations,
+        num_parents_mating=parents,
         parent_selection_type="sus",
 
         # initial population
@@ -314,23 +318,51 @@ if __name__ == "__main__":
         init_range_high=4, # highest valid value for gene (exclusive)
 
         # agent evaluation
-        mutation_probability=0.1,
-        keep_elitism=1, # keep best n solutions in the next generation
+        mutation_probability=mutation_probability,
+        keep_elitism=elitism, # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
-        mutation_type=mutation,
-        crossover_type=crossover,
-        on_generation=on_generation,
+        mutation_type=mutation_func,
+        crossover_type=crossover_func,
 
         # computation
-        parallel_processing=['thread', 16] 
+        parallel_processing=['thread', 16],
+
+        save_best_solutions=True
     )
+
+    if display:
+        ga.on_generation = on_generation
 
     # run multiple tournaments and generations to find the best solution
     ga.run()
 
     # read & display best solution
-    solution, solution_fitness, _ = ga.best_solution()
-    show_solution(solution, solution_fitness, sequential_display=True)
+    if display:
+        solution, solution_fitness, _ = ga.best_solution()
+        show_solution(solution, solution_fitness, sequential_display=True)
+
+    return ga.best_solutions_fitness
+
+if __name__ == "__main__":
+    maze_file = "./mazes/maze_treasure_2.txt"
+    generations = 100
+    population_size = 100
+    parents = 5
+    elitism = 1
+    mutation_probability = 0.1
+    mutation_func = mutation
+    crossover_func = crossover
+    population_func=generate_valid_population
+    display = True
+    if len(argv) > 1:
+        maze_file = argv[1]
+
+    # initalize random numbers generator
+    seed(RANDOM_SEED)
+    # read variables MAZE and MAZE_START from file
+    encode_maze(open(maze_file, "r").read())
+
+    print(run_ga(generations, population_func, population_size, parents, mutation_probability, elitism, mutation_func, crossover_func, display))
     
