@@ -1,7 +1,6 @@
 
 
-from random import choice, choices, random, seed
-from sys import argv
+from random import choice, choices, random
 from time import sleep
 
 import numpy as np
@@ -45,7 +44,8 @@ directions_reverse = {v: k for k, v in directions.items()}
 
 def encode_maze(s):
     # sets global variables of MAZE and MAZE_START based on encoding values
-    global MAZE, MAZE_START, TREASURES, VALID_POINTS
+    global MAZE, MAZE_START, TREASURES
+    TREASURES = 0
 
     rows = s.split("\n")
     MAZE = np.zeros((len(rows), len(rows[0])))
@@ -159,7 +159,7 @@ def generate_valid_population(n):
 
 def new_agent():
     values = list(directions.values())
-    return choices(values, k=len(MAZE.size))
+    return choices(values, k=MAZE.size)
 
 def generate_population(n):
     # generates population of size 'n'
@@ -302,7 +302,19 @@ def on_generation(ga_instance):
         solution, solution_fitness, _ = ga_instance.best_solution()
         show_solution(solution, solution_fitness)
 
-def run_ga(generations, population_func, population_size, parents, mutation_probability, elitism, mutation_func, crossover_func, display):
+def run_ga(generations, population_custom_func, population_size, parents, mutation_probability, elitism, mutation_custom_func, crossover_custom_func, display):
+    population_func = generate_population
+    if population_custom_func:
+        population_func = generate_valid_population
+    
+    mutation_func = None
+    if mutation_custom_func:
+        mutation_func = mutation
+
+    crossover_func = None
+    if crossover_custom_func:
+        crossover_func = crossover
+
     # initialize population
     initial_population = np.array(population_func(population_size))
 
@@ -311,7 +323,7 @@ def run_ga(generations, population_func, population_size, parents, mutation_prob
         # main settings
         random_seed=RANDOM_SEED,
         num_generations=generations,
-        num_parents_mating=parents,
+        num_parents_mating=max(1, int(parents * population_size)),
         parent_selection_type="sus",
 
         # initial population
@@ -324,7 +336,7 @@ def run_ga(generations, population_func, population_size, parents, mutation_prob
 
         # agent evaluation
         mutation_probability=mutation_probability,
-        keep_elitism=elitism, # keep best n solutions in the next generation
+        keep_elitism=int(elitism * population_size), # keep best n solutions in the next generation
 
         # custom functions
         fitness_func=fitness,
@@ -334,7 +346,8 @@ def run_ga(generations, population_func, population_size, parents, mutation_prob
         # computation
         parallel_processing=['thread', 16],
 
-        save_best_solutions=True
+        save_best_solutions=True,
+        suppress_warnings=True
     )
 
     if display:
@@ -348,14 +361,14 @@ def run_ga(generations, population_func, population_size, parents, mutation_prob
         solution, solution_fitness, _ = ga.best_solution()
         show_solution(solution, solution_fitness, sequential_display=True)
 
-    return ga.best_solutions_fitness
+    return ga.best_solutions_fitness, ga.best_solutions
 
 if __name__ == "__main__":
     maze_file = "./mazes/maze_treasure_2.txt"
     generations = 200
     population_size = 100
-    parents = 5
-    elitism = 1
+    parents = 0.05
+    elitism = 0.01
     mutation_probability = 0.1
     mutation_func = mutation
     crossover_func = crossover

@@ -3,3 +3,6 @@
 
 # python cache
 *.pyc
+
+# analysis data
+*.csv
