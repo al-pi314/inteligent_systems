@@ -19,6 +19,7 @@ FINISH_MULTPILER = 1
 UNIQUE_MOVE_REWARD = 1
 REPEATED_MOVE_REWARD = 0.9
 BONUS_MOVE_REWARD = 2
+INVALID_MOVE_PENALTY = 2
 
 # display settings
 SHOW_EVERY_N_GENS = 20
@@ -90,14 +91,18 @@ def fitness(path, solution_idx):
     collected_treasures = 0
     multiplier = 1
     moves = 0
+    invalid_moves = 0
     found_finish = False
     for i in range(len(path)):
         moves += 1
         p = path[i]
 
         # check if the move is valid and if any score adjustment is required
-        curr, _ = move(p, curr)
+        curr, is_valid = move(p, curr)
         curr_tuple = tuple(curr)
+
+        if not is_valid:
+            invalid_moves += 1
         
         # algorithem found treasure
         if curr_tuple not in visited and MAZE[curr[1], curr[0]] == encoding["T"]:
@@ -126,7 +131,7 @@ def fitness(path, solution_idx):
         score = unique_moves * UNIQUE_MOVE_REWARD + repeated_moves * REPEATED_MOVE_REWARD + remaining_moves * BONUS_MOVE_REWARD
 
     # encurage finding treasures with a multipiler
-    return score * multiplier
+    return score * multiplier - invalid_moves * INVALID_MOVE_PENALTY
 
 
 def new_valid_agent():
@@ -347,7 +352,7 @@ def run_ga(generations, population_func, population_size, parents, mutation_prob
 
 if __name__ == "__main__":
     maze_file = "./mazes/maze_treasure_2.txt"
-    generations = 100
+    generations = 200
     population_size = 100
     parents = 5
     elitism = 1
