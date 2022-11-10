@@ -20,7 +20,6 @@ def save_to_csv():
 def save_to_df(data):
     # lock access to shared resources
     lock.acquire()
-
     global writes
     for result in data:
         # unpack result data
@@ -35,10 +34,11 @@ def save_to_df(data):
         runs.index = runs.index + 1
 
         # check if the save should also update the actual file on disk
-        writes += 1
         if writes % save_on_n_writes == 0:
             # update file on disk
             save_to_csv()
+        writes += 1
+
     # unlock resources
     lock.release()
         
@@ -61,18 +61,19 @@ def execute_combinations(combinations, start_run_id):
     # at the end write all data to data frame (uses locking)
     save_to_df(data)   
 
+
 if __name__ == "__main__":
     # set random seed
     seed(100)
 
     # directories paths (must exist)
     directory = "./mazes/"
-    save_dir = "./analysis/"
+    save_dir = "/home/kerikon/Development/inteligent_systems/seminar_1/analysis/"
 
     # all possible parameters
     parameters = {
         "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_6.txt", "maze_7.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt", "maze_treasure_6.txt", "maze_treasure_7.txt"],
-        "generations": list(range(25, 501, 25)),
+        "generations": [500],
         "custom_population_func": [True, False],
         "population_size": list(range(25, 251, 25)),
         "parents": arange(0.02, 0.53, 0.05),
@@ -91,17 +92,16 @@ if __name__ == "__main__":
     generations_scores = pd.DataFrame(columns=["run", "generation", "score", "path"])
 
     # how frequently to write to file
-    save_on_n_writes = 1
+    save_on_n_writes = 3000
     writes = 0
 
     # thread pool parameters
-    n_theads = 5
-    task_size = 1
+    n_theads = 300
+    task_size = 5
     task_idx = 0
 
     # start thread pool
     with ThreadPoolExecutor(max_workers=n_theads) as executor:
-        prev_done = 0.0
         while task_size * task_idx <= combinations_len:
             # combinations that will be evaluated by a thread
             thread_combinations = combinations[task_idx * task_size: ((task_idx +1) * task_size)]
@@ -109,13 +109,5 @@ if __name__ == "__main__":
             executor.submit(execute_combinations, thread_combinations, task_size * task_idx)
             # update task status
             task_idx += 1
-
-            # print percent done up to 3 decimals when it changes
-            curr_perecent = round(task_size * task_idx / combinations_len, 3)
-            if curr_perecent > prev_done:
-                print(f'{curr_perecent}% done')
-            prev_done = curr_perecent
-    
     # final save
     save_to_csv()
-    print("finished!")
