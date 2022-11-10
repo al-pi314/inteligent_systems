@@ -51,7 +51,7 @@ def execute_combinations(combinations, start_run_id):
         # extract maze file path and load it
         maze_file = params[0]
         maze_ga = MazeGa()
-        maze_ga.encode_maze(open(directory + maze_file, "r").read())
+        maze_ga.encode_maze(file_data[maze_file])
 
         # other parameters are needed for ga function call + display = False parameter
         func_params = list(params[1:]) + [False]
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     # all possible parameters
     parameters = {
         "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_6.txt", "maze_7.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt", "maze_treasure_6.txt", "maze_treasure_7.txt"],
-        "generations": [500],
+        "generations": [300],
         "custom_population_func": [True, False],
         "population_size": list(range(25, 251, 25)),
         "parents": arange(0.02, 0.53, 0.05),
@@ -83,6 +83,12 @@ if __name__ == "__main__":
         "elitism": arange(0, 0.051, 0.01),
         "custom_functions": [True, False],
     }
+
+    file_data = {}
+    for name in parameters["maze_file"]:
+        f = open(directory + name, "r")
+        file_data[name] = f.read()
+        f.close()
 
     # every possible combination of parameters
     combinations = list(itertools.product(*parameters.values()))
