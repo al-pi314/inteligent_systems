@@ -3,7 +3,7 @@ from random import seed
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Lock
 import pandas as pd
-from maze_ga import encode_maze, run_ga
+from maze_ga import MazeGa
 from numpy import arange
 
 lock = Lock()
@@ -13,6 +13,7 @@ def encode_path(path):
     return ''.join([str(x) for x in path])
 
 def save_to_csv():
+    print("saving to file. Num of writes:", writes)
     # stores data from data frames to file on disk (for safety so that the results are not lost in case of an error)
     runs.to_csv(save_dir + "runs.csv", index=True)
     generations_scores.to_csv(save_dir + "generations_scores.csv", index=True)
@@ -49,17 +50,18 @@ def execute_combinations(combinations, start_run_id):
     for run_id, params in enumerate(combinations):
         # extract maze file path and load it
         maze_file = params[0]
-        encode_maze(open(directory + maze_file, "r").read())
+        maze_ga = MazeGa()
+        maze_ga.encode_maze(open(directory + maze_file, "r").read())
 
         # other parameters are needed for ga function call + display = False parameter
         func_params = list(params[1:]) + [False]
         # execute ga algorithem and retrive results
-        solutions_fintness, best_solutions = run_ga(*func_params)
+        solutions_fintness, best_solutions = maze_ga.run_ga(*func_params)
         # store results for later use
         data.append((solutions_fintness, best_solutions, params, start_run_id + run_id))
 
     # at the end write all data to data frame (uses locking)
-    save_to_df(data)   
+    save_to_df(data) 
 
 
 if __name__ == "__main__":
@@ -79,13 +81,13 @@ if __name__ == "__main__":
         "parents": arange(0.02, 0.53, 0.05),
         "mutation_rate": arange(0.05, 0.51, 0.05),
         "elitism": arange(0, 0.051, 0.01),
-        "custom_mutation_func": [True, False],
-        "custom_crossover_func": [True, False],
+        "custom_functions": [True, False],
     }
 
     # every possible combination of parameters
     combinations = list(itertools.product(*parameters.values()))
     combinations_len = len(combinations)
+    print("combinations size", combinations_len)
 
     # data frames that store all run results
     runs = pd.DataFrame(columns=list(parameters.keys()) + ["run"])
@@ -96,7 +98,7 @@ if __name__ == "__main__":
     writes = 0
 
     # thread pool parameters
-    n_theads = 300
+    n_theads = 10
     task_size = 5
     task_idx = 0
 
