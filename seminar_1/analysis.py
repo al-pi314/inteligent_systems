@@ -4,7 +4,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Lock
 import pandas as pd
 from maze_ga import MazeGa
-from numpy import arange
+from numpy import arange, linspace
 from time import time as seconds
 
 generations_scores_dataframe_lock = Lock()
@@ -62,6 +62,7 @@ def execute_combination(input_data):
     solutions_fintness, best_solutions = maze_ga.run_ga(*func_params)
 
     # at the end write all data to data frame (uses locking)
+    print(run_id, "finished")
     save_to_df(solutions_fintness, best_solutions, combination, run_id) 
 
 
@@ -75,13 +76,13 @@ if __name__ == "__main__":
 
     # all possible parameters
     parameters = {
-        "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_6.txt", "maze_7.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt", "maze_treasure_6.txt", "maze_treasure_7.txt"],
-        "generations": [300],
+        "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_6.txt", "maze_7.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt", "maze_treasure_7.txt"],
+        "generations": [150],
         "custom_population_func": [True, False],
         "population_size": list(range(25, 251, 25)),
-        "parents": arange(0.02, 0.53, 0.05),
-        "mutation_rate": arange(0.05, 0.51, 0.05),
-        "elitism": arange(0, 0.051, 0.01),
+        "parents": linspace(0.01, 0.25, 5),
+        "mutation_rate": linspace(0.01, 0.1, 5),
+        "elitism": [0, 0.01, 0.1],
         "custom_functions": [True, False],
     }
 
@@ -104,14 +105,16 @@ if __name__ == "__main__":
     start_time = round(seconds() * 1000)
 
     # save on n runs
-    save_on_n_runs = 10
+    save_on_n_runs = 100
 
     # thread pool parameters
-    max_workers = 1000
+    max_workers = 500
 
     # start thread pool
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        executor.map(execute_combination, enumerate(combinations))
+        for future in executor.map(execute_combination, enumerate(combinations)):
+            future.results()
+        
 
     # final save
     save_to_csv()
