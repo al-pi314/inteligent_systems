@@ -5,63 +5,64 @@ from threading import Lock
 import pandas as pd
 from maze_ga import MazeGa
 from numpy import arange
+from time import time as seconds
 
-lock = Lock()
+generations_scores_dataframe_lock = Lock()
+runs_dataframe_lock = Lock()
+generations_scores_filewrite_lock = Lock()
+runs_filewrite_lock = Lock()
+global_write_lock = Lock()
 
 def encode_path(path):
     # convert path array into a string that can be later used for creating an agent
     return ''.join([str(x) for x in path])
 
 def save_to_csv():
-    print("saving to file. Num of writes:", writes)
-    # stores data from data frames to file on disk (for safety so that the results are not lost in case of an error)
+    # save runs data to csv
+    runs_filewrite_lock.acquire()
     runs.to_csv(save_dir + "runs.csv", index=True)
+    runs_filewrite_lock.release()
+
+    # save generations_scores to csv
+    generations_scores_filewrite_lock.acquire()
     generations_scores.to_csv(save_dir + "generations_scores.csv", index=True)
+    generations_scores_filewrite_lock.release()
 
-def save_to_df(data):
-    # lock access to shared resources
-    lock.acquire()
-    global writes
-    for result in data:
-        # unpack result data
-        solutions_fintness, best_solutions, params, run_id = result
-        # add each solution fitness in order to generation_scores data frame
-        for i in range(len(solutions_fintness)):
-            generations_scores.loc[-1] = [run_id, i, solutions_fintness[i], encode_path(best_solutions[i])]
-            generations_scores.index = generations_scores.index + 1
+def save_to_df(solutions_fintness, best_solutions, combination, run_id):
+    # add each solution fitness in order to generation_scores data frame
+    generations_scores_dataframe_lock.acquire()
+    for i in range(len(solutions_fintness)):
+        generations_scores.loc[-1] = [run_id, i, solutions_fintness[i], encode_path(best_solutions[i])]
+        generations_scores.index = generations_scores.index + 1
+    generations_scores_dataframe_lock.release()
 
-        # add run data to runs data frame + add run_id that can be mapped to generations_scores data frame
-        runs.loc[-1] = list(params) + [run_id]
-        runs.index = runs.index + 1
 
-        # check if the save should also update the actual file on disk
-        if writes % save_on_n_writes == 0:
-            # update file on disk
-            save_to_csv()
-        writes += 1
+    # add run data to runs data frame + add run_id that can be mapped to generations_scores data frame
+    runs_dataframe_lock.acquire()
+    runs.loc[-1] = list(combination) + [run_id]
+    runs.index = runs.index + 1
+    runs_dataframe_lock.release()
 
-    # unlock resources
-    lock.release()
-        
+    # check writes
+    if run_id % save_on_n_runs == 0:
+        print("time needed per task", (round(seconds() * 1000) - start_time) / run_id)
+        save_to_csv()
 
-def execute_combinations(combinations, start_run_id):
-    # data stores all calculated results
-    data = []
-    for run_id, params in enumerate(combinations):
-        # extract maze file path and load it
-        maze_file = params[0]
-        maze_ga = MazeGa()
-        maze_ga.encode_maze(file_data[maze_file])
+def execute_combination(input_data):
+    run_id, combination = input_data
 
-        # other parameters are needed for ga function call + display = False parameter
-        func_params = list(params[1:]) + [False]
-        # execute ga algorithem and retrive results
-        solutions_fintness, best_solutions = maze_ga.run_ga(*func_params)
-        # store results for later use
-        data.append((solutions_fintness, best_solutions, params, start_run_id + run_id))
+    # extract maze file path and load it
+    maze_file = combination[0]
+    maze_ga = MazeGa()
+    maze_ga.encode_maze(file_data[maze_file])
+
+    # other parameters are needed for ga function call + display = False parameter
+    func_params = list(combination[1:]) + [False]
+    # execute ga algorithem and retrive results
+    solutions_fintness, best_solutions = maze_ga.run_ga(*func_params)
 
     # at the end write all data to data frame (uses locking)
-    save_to_df(data) 
+    save_to_df(solutions_fintness, best_solutions, combination, run_id) 
 
 
 if __name__ == "__main__":
@@ -99,23 +100,18 @@ if __name__ == "__main__":
     runs = pd.DataFrame(columns=list(parameters.keys()) + ["run"])
     generations_scores = pd.DataFrame(columns=["run", "generation", "score", "path"])
 
-    # how frequently to write to file
-    save_on_n_writes = 3000
-    writes = 0
+    # start time
+    start_time = round(seconds() * 1000)
+
+    # save on n runs
+    save_on_n_runs = 10
 
     # thread pool parameters
-    n_theads = 10
-    task_size = 5
-    task_idx = 0
+    max_workers = 1000
 
     # start thread pool
-    with ThreadPoolExecutor(max_workers=n_theads) as executor:
-        while task_size * task_idx <= combinations_len:
-            # combinations that will be evaluated by a thread
-            thread_combinations = combinations[task_idx * task_size: ((task_idx +1) * task_size)]
-            # start thread with parameters
-            executor.submit(execute_combinations, thread_combinations, task_size * task_idx)
-            # update task status
-            task_idx += 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor.map(execute_combination, enumerate(combinations))
+
     # final save
     save_to_csv()
