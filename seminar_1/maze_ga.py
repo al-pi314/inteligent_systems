@@ -1,10 +1,7 @@
-
-
-
-
-
+import json
 import numpy as np
 import pygad
+from sys import argv
 from display import on_generation_factory, show_solution
 from function_factory import (crossover_factory, fitness_factory,
                               generate_population_factory, mutation_factory)
@@ -18,7 +15,7 @@ class MazeGa:
     treasures = 0
 
     # factor to use for penalties & rewards
-    TREASURE_MULTIPLIER = 2
+    TREASURE_MULTIPLIER = 1
     FINISH_MULTPILER = 1
     UNIQUE_MOVE_REWARD = 1
     REPEATED_MOVE_REWARD = 0.9
@@ -44,7 +41,7 @@ class MazeGa:
     }
     directions_reverse = {v: k for k, v in directions.items()}
 
-    def __init__(self, maze_string, use_custom_functions=False, valid_only=False, show_each_n=0, threads=0):
+    def __init__(self, maze_string, use_custom_functions=False, valid_only=False, show_each_n=0, wait_on_show=False, threads=0):
         self.encode_maze(maze_string)
 
         self.mutation = "scramble"
@@ -60,7 +57,7 @@ class MazeGa:
         self.display = False
         if show_each_n > 0:
             self.display = True
-            self.on_generation = on_generation_factory(self, show_each_n)
+            self.on_generation = on_generation_factory(self, show_each_n, wait_on_show)
 
         self.multithread = False
         self.threads = 0
@@ -157,20 +154,32 @@ class MazeGa:
         return ga.best_solutions_fitness, ga.best_solutions
 
 if __name__ == "__main__":
-    maze_file_path = "./mazes/maze_treasure_4.txt"
+    settings_file = "./settings.json"
+    if len(argv) > 1:
+        settings_file = argv[1]
+    with open(settings_file, "r") as f:
+        settings = json.load(f)
 
-    maze_file = open(maze_file_path, "r")
+    print("Running with settings:")
+    print(json.dumps(settings, indent=4))
+
+
+    maze_file = open(settings["maze_file"], "r")
     maze_string = maze_file.read()
     maze_file.close()
 
-    maze_ga = MazeGa(maze_string, use_custom_functions=True, valid_only=True, show_each_n=10)
+    print("Solving maze:")
+    print(maze_string)
 
-    generations = 100
-    population_size = 20
-    parents = 0.1
-    elitism = 0.05
-    mutation_probability = 0.1
+    maze_ga = MazeGa(maze_string, 
+                    use_custom_functions=settings["use_custom_functions"], 
+                    valid_only=settings["valid_only"], 
+                    show_each_n=settings["show_each_n"], 
+                    wait_on_show=settings["wait_on_show"], 
+                    threads=settings["threads"])
 
-    maze_ga.run(generations, population_size, parents, mutation_probability, elitism)
-
-    
+    maze_ga.run(settings["generations"], 
+                settings["population_size"], 
+                settings["parents"], 
+                settings["mutation_probability"], 
+                settings["elitism"])

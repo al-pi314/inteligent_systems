@@ -1,0 +1,13 @@
+{
+    "maze_file": "./mazes/maze_treasure_7.txt",
+    "use_custom_functions": true,
+    "valid_only": false,
+    "show_each_n": 10,
+    "wait_on_show": true,
+    "generations": 200,
+    "population_size": 100,
+    "parents": 0.2,
+    "elitism": 0.01,
+    "mutation_probability": 0.1,
+    "threads": 0
+}
