@@ -53,10 +53,12 @@ def display_maze(maze_ga, visited, current=None):
                 print(maze_ga.encoding_reverse[maze_ga.maze[i, j]], end="")
         print()
 
-def on_generation_factory(maze_ga, each_n_generations=1):
+def on_generation_factory(maze_ga, each_n_generations=1, wait_on_show=False):
     def on_generation(ga_instance):
         print("generation: {}".format(ga_instance.generations_completed))
         if ga_instance.generations_completed % each_n_generations == 0:
             solution, solution_fitness, _ = ga_instance.best_solution()
             show_solution(maze_ga, solution, solution_fitness)
+            if wait_on_show:
+                input("--> Press Any Key to continue...")
     return on_generation
