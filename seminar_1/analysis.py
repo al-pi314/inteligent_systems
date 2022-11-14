@@ -1,11 +1,13 @@
 import itertools
+import os.path
+from multiprocessing import Pool
 from random import seed
-from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Lock
+from time import time as seconds
+
 import pandas as pd
 from maze_ga import MazeGa
-from numpy import arange, linspace
-from time import time as seconds
+from numpy import linspace
 
 generations_scores_dataframe_lock = Lock()
 runs_dataframe_lock = Lock()
@@ -28,7 +30,8 @@ def save_to_csv():
     generations_scores.to_csv(save_dir + "generations_scores.csv", index=True)
     generations_scores_filewrite_lock.release()
 
-def save_to_df(solutions_fintness, best_solutions, combination, run_id):
+def save_to_df(solutions_fintness, best_solutions, input, run_id):
+    print("save_to_df", run_id)
     # add each solution fitness in order to generation_scores data frame
     generations_scores_dataframe_lock.acquire()
     for i in range(len(solutions_fintness)):
@@ -39,32 +42,31 @@ def save_to_df(solutions_fintness, best_solutions, combination, run_id):
 
     # add run data to runs data frame + add run_id that can be mapped to generations_scores data frame
     runs_dataframe_lock.acquire()
-    runs.loc[-1] = list(combination) + [run_id]
+    runs.loc[-1] = [input[key] for key in runs.columns]
     runs.index = runs.index + 1
     runs_dataframe_lock.release()
 
     # check writes
+    print(run_id, save_on_n_runs)
     if run_id % save_on_n_runs == 0:
         print("time needed per task", (round(seconds() * 1000) - start_time) / run_id)
         save_to_csv()
 
-def execute_combination(input_data):
-    run_id, combination = input_data
+def execute_combination(raw):
+    file_data, enumerated_input = raw
+    run_id, input = enumerated_input
 
     # extract maze file path and load it
-    maze_file = combination[0]
-    maze_ga = MazeGa()
-    maze_ga.encode_maze(file_data[maze_file])
+    maze_string = file_data[input["maze_file"]]
+    maze_ga = MazeGa(maze_string, use_custom_functions=input["use_custom_functions"], valid_only=input["valid_only"], show_each_n=0, threads=5)
 
-    # other parameters are needed for ga function call + display = False parameter
-    func_params = list(combination[1:]) + [False]
     # execute ga algorithem and retrive results
-    solutions_fintness, best_solutions = maze_ga.run_ga(*func_params)
+    solutions_fintness, best_solutions = maze_ga.run(input["generations"], input["population_size"], input["parents"], input["mutation_probability"], input["elitism"])
 
     # at the end write all data to data frame (uses locking)
     print(run_id, "finished")
-    save_to_df(solutions_fintness, best_solutions, combination, run_id) 
-
+    
+    save_to_df(solutions_fintness, best_solutions, input, run_id) 
 
 if __name__ == "__main__":
     # set random seed
@@ -72,18 +74,18 @@ if __name__ == "__main__":
 
     # directories paths (must exist)
     directory = "./mazes/"
-    save_dir = "/home/kerikon/Development/inteligent_systems/seminar_1/analysis/"
+    save_dir = "./analysis/"
 
     # all possible parameters
     parameters = {
         "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_6.txt", "maze_7.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt", "maze_treasure_7.txt"],
         "generations": [150],
-        "custom_population_func": [True, False],
+        "valid_only": [True, False],
         "population_size": list(range(25, 251, 25)),
         "parents": linspace(0.01, 0.25, 5),
-        "mutation_rate": linspace(0.01, 0.1, 5),
+        "mutation_probability": linspace(0.01, 0.1, 5),
         "elitism": [0, 0.01, 0.1],
-        "custom_functions": [True, False],
+        "use_custom_functions": [True, False],
     }
 
     file_data = {}
@@ -93,13 +95,25 @@ if __name__ == "__main__":
         f.close()
 
     # every possible combination of parameters
-    combinations = list(itertools.product(*parameters.values()))
+    values_combinations = list(itertools.product(*parameters.values()))
+    combinations = [
+        dict(zip(parameters.keys(), combination)) for combination in values_combinations
+    ]
     combinations_len = len(combinations)
+    print(combinations[0])
     print("combinations size", combinations_len)
 
     # data frames that store all run results
     runs = pd.DataFrame(columns=list(parameters.keys()) + ["run"])
     generations_scores = pd.DataFrame(columns=["run", "generation", "score", "path"])
+
+    # read existing files
+    if os.path.isfile(save_dir + "runs.csv"):
+        runs = pd.read_csv(save_dir + "runs.csv", index_col=0)
+        print("runs loaded from csv")
+    if os.path.isfile(save_dir + "generations_scores.csv"):
+        generations_scores = pd.read_csv(save_dir + "generations_scores.csv", index_col=0)
+        print("generations_scores loaded from csv")
 
     # start time
     start_time = round(seconds() * 1000)
@@ -108,11 +122,11 @@ if __name__ == "__main__":
     save_on_n_runs = 100
 
     # thread pool parameters
-    max_workers = 500
+    max_workers = 10
 
     # start thread pool
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for future in executor.map(execute_combination, enumerate(combinations)):
+    with Pool(processes=max_workers) as executor:
+        for future in executor.map(execute_combination, [(file_data, v) for v in enumerate(combinations)]):
             future.results()
         
 
