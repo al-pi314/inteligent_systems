@@ -44,7 +44,7 @@ class MazeGa:
     }
     directions_reverse = {v: k for k, v in directions.items()}
 
-    def __init__(self, maze_string, use_custom_functions=False, valid_only=False, show_each_n=0):
+    def __init__(self, maze_string, use_custom_functions=False, valid_only=False, show_each_n=0, threads=0):
         self.encode_maze(maze_string)
 
         self.mutation = "scramble"
@@ -61,6 +61,12 @@ class MazeGa:
         if show_each_n > 0:
             self.display = True
             self.on_generation = on_generation_factory(self, show_each_n)
+
+        self.multithread = False
+        self.threads = 0
+        if threads > 0:
+            self.multithread = True
+            self.threads = threads
 
     def encode_maze(self, maze_string):
         self.treasures = 0
@@ -133,6 +139,9 @@ class MazeGa:
             save_best_solutions=True,
             suppress_warnings=True
         )
+
+        if self.multithread:
+            ga.parallel_processing = ["threading", self.threads]
 
         if self.display:
             ga.on_generation = self.on_generation
