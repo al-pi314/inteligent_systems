@@ -65,6 +65,9 @@ class MazeGa:
             self.multithread = True
             self.threads = threads
 
+    def path_str_to_list(self, path_str):
+        return [int(p) for p in path_str]
+
     def encode_maze(self, maze_string):
         self.treasures = 0
 
