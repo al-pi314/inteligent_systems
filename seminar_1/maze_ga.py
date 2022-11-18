@@ -9,7 +9,7 @@ from function_factory import (crossover_factory, fitness_factory,
 
 class MazeGa:
     # global variables
-    random_seed = 100
+    random_seed = 200
     maze = None
     maze_start = None
     treasures = 0
@@ -146,6 +146,21 @@ class MazeGa:
         if self.display:
             ga.on_generation = self.on_generation
 
+        print("Example of starting solution 1:")
+        show_solution(self, initial_population[10], 0, False)
+
+        print("Example of starting solution 2:")
+        show_solution(self, initial_population[90], 0, False)
+
+        print("Example of crossover")
+        crossed = maze_ga.crossover([initial_population[10], initial_population[90]], (1, initial_population[0].size), ga)
+        show_solution(self, crossed[0], 0, False)
+
+        print("Example of muation")
+        mutated = maze_ga.mutation(crossed, ga)
+        show_solution(self, mutated[0], 0, False)
+
+
         # run multiple tournaments and generations to find the best solution
         ga.run()
 
@@ -173,6 +188,7 @@ if __name__ == "__main__":
 
     print("Solving maze:")
     print(maze_string)
+
 
     maze_ga = MazeGa(maze_string, 
                     use_custom_functions=settings["use_custom_functions"], 

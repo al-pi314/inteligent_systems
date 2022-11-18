@@ -6,3 +6,9 @@
 
 # analysis data
 *.csv
+
+# temp files
+~$*
+
+# report files
+results/
