@@ -1,6 +1,7 @@
 {
     "maze_file": "./mazes/maze_treasure_7.txt",
-    "use_custom_functions": true,
+    "custom_crossover": true,
+    "custom_mutation": true,
     "valid_only": false,
     "show_each_n": 10,
     "wait_on_show": true,

@@ -10,5 +10,5 @@
 # temp files
 ~$*
 
-# report files
-results/
+# analysis files
+analysis/

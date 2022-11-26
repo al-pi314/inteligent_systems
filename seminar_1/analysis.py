@@ -2,137 +2,226 @@ import itertools
 import os.path
 from multiprocessing import Pool
 from random import seed, random
-
+from collections import OrderedDict
+import sys
+import hashlib
+import json
 import pandas as pd
 from maze_ga import MazeGa
 from numpy import linspace
+import time
 
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+OVERWRITE_ON_CHANGE = False
+SAVE_FREQUENCY = 1
+SOLVING_CHUNK_SIZE = 1
+MAX_PROCESSES = 10
 
+class Storage():
+    def __init__(self, run_file, generation_file, settings_file, save_frequency=1):
+        self.run_file = run_file
+        self.generation_file = generation_file
+        self.settings_file = settings_file
+        self.last_run_id = -1
+        self.save_frequency = save_frequency
+        self.save_requests = 0
+        self.settings_hash = ""
 
-def encode_path(path):
-    # convert path array into a string that can be later used for creating an agent
-    return ''.join([str(x) for x in path])
+    def load_header(self):
+        self.run_df = pd.read_parquet(self.run_file, engine='fastparquet')
+        self.generation_df = pd.read_parquet(self.generation_file, engine='fastparquet')
 
-def error_callback(e):
-    print("ERROR: ", e)
+    def set_header(self, runs_header, generations_header):
+        self.run_df = pd.DataFrame(columns=runs_header)
+        self.generation_df = pd.DataFrame(columns=generations_header)
+        self.store_runs(append=False)
+        self.store_generations(append=False)
 
-def save_to_csv():
-    print("saving to csv")
+    def check_header(self, runs_header, generations_header):
+        if not self.storage_ok():
+            self.set_header(runs_header, generations_header)
+        else:
+            self.load_header()
+            if not set(runs_header) == set(self.run_df.columns):
+                raise ValueError('Run header does not match')
+            if not set(generations_header) == set(self.generation_df.columns):
+                raise ValueError('Generation header does not match')
+        
+    def storage_ok(self):
+        return os.path.isfile(self.run_file) and os.path.isfile(self.generation_file) and os.path.isfile(self.settings_file)
+    
+    def set_settings_hash(self, settings_hash):
+        self.settings_hash = settings_hash
 
-    # save runs data to csv
-    runs.to_csv(analysis_runs_file, index=True)
+    def load_settings(self):
+        with open(self.settings_file, 'r') as f:
+            try:
+                self.settings_hash = f.readline().strip("\n")
+                run_id = f.readline().strip("\n")
+                if run_id != "":
+                    self.last_run_id = int(run_id)
+            except ValueError:
+                pass
 
-    # save generations_scores to csv
-    generations_scores.to_csv(analysis_generations_scores_file, index=True)
+    def update_settings(self):
+        with open(self.settings_file, 'w') as f:
+            f.write(self.settings_hash)
+            f.write("\n")
+            f.write(str(self.last_run_id))
+            f.write("\n")
+    
+    def store_runs(self, append=True):
+        self.last_run_id = self.run_df["run_id"].max()
+        self.update_settings()
+        self.run_df.to_parquet(self.run_file, engine='pyarrow', compression='gzip', append=append)
+    
+    def store_generations(self, append=True):
+        self.generation_df.to_parquet(self.generation_file, engine='pyarrow', compression='gzip', append=append)
 
-def save_to_df(solutions_fintness, best_solutions, parameters, run_id):
-    global runs, generations_scores
-    # add each solution fitness in order to generation_scores data frame
-    generation_stats = []
-    for i in range(len(solutions_fintness)):
-        generation_stats.append([run_id, i, solutions_fintness[i], encode_path(best_solutions[i])])
-    generations_scores = generations_scores.append(pd.DataFrame(generation_stats, columns=generations_scores_columns), ignore_index=True)
+    def concat_runs(self, run_result):
+        run_result_df = pd.DataFrame(run_result, index=[0])
+        self.run_df = pd.concat([self.run_df, run_result_df], ignore_index=True)
 
-    # add run data to runs data frame + add run_id that can be mapped to generations_scores data frame
-    parameters["run_id"] = run_id
-    runs = runs.append(parameters, ignore_index=True)
+    def concat_generations(self, generation_result):
+        generation_result_df = pd.DataFrame(generation_result)
+        self.generation_df = pd.concat([self.generation_df, generation_result_df], ignore_index=True)
+        
+    def save(self, results):
+        for parameters, solutions in results:
+            # Store run to datraframe
+            self.concat_runs(parameters)
+            # Store each generation to dataframe
+            for i in range(len(solutions)):
+                solution_fitness, solution_path = solutions[i]
+                generation_result = {
+                    "run_id": parameters["run_id"],
+                    "generation": i,
+                    "fitness": solution_fitness,
+                    "path": solution_path
+                }
+                self.concat_generations(generation_result)
+            
+            # Save to disk if save frequency is reached
+            self.save_requests += 1
+            if self.save_requests >= self.save_frequency:
+                self.store_runs()
+                self.store_generations()
+                self.save_requests = 0
+        
 
-def save_results(results):
-    # save results to data frame
-    for solutions_fintness, best_solutions, parameters, run_id in results:
-        save_to_df(solutions_fintness, best_solutions, parameters, run_id)
-    save_to_csv()
+class Analysis():
+    parameters = OrderedDict({
+        "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt"],
+        "generations": [300],
+        "valid_only": [True, False],
+        "population_size": list(range(50, 500, 50)),
+        "parents": linspace(0.01, 0.25, 5),
+        "mutation_probability": linspace(0.01, 0.1, 5),
+        "elitism": linspace(0.01, 0.05, 5),
+        "custom_mutation" : [True, False],
+        "custom_crossover" : [True, False],
+    })
+    mazes = {}
 
-def execute_combination(run_id, parameters, maze_strings):
+    def load_mazes(self, maze_dir):
+        self.mazes = {}
+        for maze_file in self.parameters["maze_file"]:
+            with open(os.path.join(maze_dir, maze_file), "r") as f:
+                self.mazes[maze_file] = f.read()
+    
+    def combinations(self):
+        named_parameter_cominations = [dict(zip(self.parameters.keys(), values)) for values in itertools.product(*self.parameters.values())]
+        print("Number of combinations: {}".format(len(named_parameter_cominations)))
+        print("Example combination: {}".format(named_parameter_cominations[0]))
+        return named_parameter_cominations
+    
+    def parameters_hash(self):
+        dhash = hashlib.md5()
+        for key, value in self.parameters.items():
+            dhash.update(str(key).encode('utf-8'))
+            dhash.update(str(value).encode('utf-8'))
+        return dhash.hexdigest()
+   
+def execute_combination(run_id, parameters):
     # extract maze file path and load it
-    maze_string = maze_strings[parameters["maze_file"]]
-    maze_ga = MazeGa(maze_string, use_custom_functions=parameters["use_custom_functions"], valid_only=parameters["valid_only"], show_each_n=0, threads=5)
+    maze_ga = MazeGa(
+        parameters["maze_file"], 
+        custom_mutation=parameters["custom_mutation"],
+        custom_crossover=parameters["custom_crossover"], 
+        valid_only=parameters["valid_only"], 
+        show_each_n=0, 
+        threads=5
+    )
 
     # execute ga algorithem and retrive results
-    solutions_fintness, best_solutions = maze_ga.run(parameters["generations"], parameters["population_size"], parameters["parents"], parameters["mutation_probability"], parameters["elitism"])
+    solutions_fintness, best_solutions = maze_ga.run(
+            parameters["generations"], 
+            parameters["population_size"], 
+            parameters["parents"], 
+            parameters["mutation_probability"], 
+            parameters["elitism"]
+    )
 
-    # at the end write all data to data frame (uses locking)
+    solutions = list(zip(solutions_fintness, best_solutions))
+    parameters["run_id"] = run_id
+
     print(run_id, "finished")
-    return solutions_fintness, best_solutions, parameters, run_id
+    return parameters, solutions
 
 if __name__ == "__main__":
+    # read args
+    if len(sys.argv) > 1:
+        OVERWRITE_ON_CHANGE = sys.argv[1] == "-ns"
+
     # set random seed
     seed(100)
 
-    # files
-    analysis_runs_file = "./analysis/runs.csv"
-    analysis_generations_scores_file = "./analysis/generations_scores.csv"
-    maze_directory = "./mazes/"
+    # expected header of runs file
+    runs_header = ["run_id", "start_time", "end_time", "maze_file", "valid_only", "population_size", "parents", "mutation_probability", "elitism", "custom_mutation", "custom_crossover"]
+    # expected header of generations file
+    generations_header = ["run_id", "start_time", "end_time", "generation", "fitness", "solution"]
 
-    # all possible parameters
-    parameters = {
-        "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_6.txt", "maze_7.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt", "maze_treasure_7.txt"],
-        "generations": [150],
-        "valid_only": [True, False],
-        "population_size": list(range(25, 251, 25)),
-        "parents": linspace(0.01, 0.25, 5),
-        "mutation_probability": linspace(0.01, 0.1, 5),
-        "elitism": [0, 0.01, 0.1],
-        "use_custom_functions": [True, False],
-    }
-    runs_columns = ["maze_file", "generations", "valid_only", "population_size", "parents", "mutation_probability", "elitism", "use_custom_functions", "run_id"]
-    generations_scores_columns = ["run_id", "generation", "fitness", "path"]
+    # storage
+    storage = Storage("./analysis/runs.parquet .", "./analysis/generations.parquet .", "./analysis/settings.txt", save_frequency=SAVE_FREQUENCY)
+    storage.check_header(runs_header, generations_header)
+    storage.load_settings()
 
-    runs = pd.DataFrame(columns=runs_columns)
-    generations_scores = pd.DataFrame(columns=generations_scores_columns)
+    # analysis parameters
+    analysis = Analysis()
+    analysis.load_mazes("./mazes")
+    combinations = analysis.combinations()
+    settings_hash = analysis.parameters_hash()
 
-    if os.path.isfile(analysis_runs_file):
-        runs = pd.read_csv(analysis_runs_file, index_col=0)
-        if set(runs_columns) != set(runs.columns):
-            print("ERROR: runs file columns missmatch")
-            print("expected: ", runs_columns)
-            print("got: ", runs.columns)
-            exit(1)
-    
-    if os.path.isfile(analysis_generations_scores_file):
-        generations_scores = pd.read_csv(analysis_generations_scores_file, index_col=0)
-        if set(generations_scores_columns) != set(generations_scores.columns):
-            print("ERROR: generations_scores file columns missmatch")
-            print("expected: ", generations_scores_columns)
-            print("got: ", generations_scores.columns)
+    # check if settings have changed
+    if storage.settings_hash != settings_hash:
+        print("Settings have changed")
+        if OVERWRITE_ON_CHANGE:
+            print("Overwriting old settings and data (10s)")
+            time.sleep(10)
+            storage.set_header(runs_header, generations_header)
+            storage.set_settings_hash(settings_hash)
+            storage.update_settings()
+        else:
             exit(1)
 
-    # read maze strings
-    maze_strings = {}
-    for maze_file in parameters["maze_file"]:
-        with open(os.path.join(maze_directory, maze_file), "r") as file:
-            maze_strings[maze_file] = file.read()
-
-
-    # every possible combination of parameters
-    values_combinations = list(itertools.product(*parameters.values()))
-    combinations = [
-        dict(zip(parameters.keys(), combination)) for combination in values_combinations
-    ]
-
-    combinations_len = len(combinations)
-    print(combinations[0])
-    print("combinations size", combinations_len)
-
-    # save on n runs
-    save_on_n_runs = 10
-
-    # thread pool parameters
-    max_processes = 10
+    # display data about last run and remaining combinations
+    print("Last run id: {}".format(storage.last_run_id))
+    enumerated_combinations = list(enumerate(combinations))
+    combinations = enumerated_combinations[storage.last_run_id+1:]
+    print("Number of combinations to execute: {}".format(len(combinations)))
 
     # start thread pool
-    with Pool(processes=max_processes) as pool:
-        solved = set(runs["run_id"].unique())
-        arguments = [(i, combinations[i], maze_strings) for i in range(len(combinations)) if i not in solved]
-        print("unsolved", len(arguments))
-        for i in range(0, len(arguments), save_on_n_runs):
-            sub_arguments = arguments[i:i + save_on_n_runs]
-            results = pool.starmap(execute_combination, sub_arguments)
-            save_results(results)
+    with Pool(processes=MAX_PROCESSES) as pool:
+        for i in range(0, len(combinations), SOLVING_CHUNK_SIZE):
+            solving_chunk = combinations[i:i + SOLVING_CHUNK_SIZE]
+            # convert maze names to maze content
+            for i in range(len(solving_chunk)):
+                solving_chunk[i][1]["maze_file"] = analysis.mazes[solving_chunk[i][1]["maze_file"]]
+            # evaluate chunk
+            results = pool.starmap(execute_combination, solving_chunk)
+            storage.save(results)
         pool.close()
         pool.join()
 
     # final save
-    save_to_csv()
+    storage.store_runs()
+    storage.store_generations()

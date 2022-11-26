@@ -41,15 +41,16 @@ class MazeGa:
     }
     directions_reverse = {v: k for k, v in directions.items()}
 
-    def __init__(self, maze_string, use_custom_functions=False, valid_only=False, show_each_n=0, wait_on_show=False, threads=0):
+    def __init__(self, maze_string, custom_mutation=False, custom_crossover=False, valid_only=False, show_each_n=0, wait_on_show=False, threads=0):
         self.encode_maze(maze_string)
 
         self.mutation = "scramble"
-        self.crossover = "single_point"
-        if use_custom_functions:
+        if custom_mutation:
             self.mutation = mutation_factory(self)
-            self.crossover = crossover_factory(self)
 
+        self.crossover = "single_point"
+        if custom_crossover:
+            self.crossover = crossover_factory(self)
 
         self.fitness = fitness_factory(self)
         self.generate_population = generate_population_factory(self, valid_only)
@@ -146,21 +147,6 @@ class MazeGa:
         if self.display:
             ga.on_generation = self.on_generation
 
-        print("Example of starting solution 1:")
-        show_solution(self, initial_population[10], 0, False)
-
-        print("Example of starting solution 2:")
-        show_solution(self, initial_population[90], 0, False)
-
-        print("Example of crossover")
-        crossed = maze_ga.crossover([initial_population[10], initial_population[90]], (1, initial_population[0].size), ga)
-        show_solution(self, crossed[0], 0, False)
-
-        print("Example of muation")
-        mutated = maze_ga.mutation(crossed, ga)
-        show_solution(self, mutated[0], 0, False)
-
-
         # run multiple tournaments and generations to find the best solution
         ga.run()
 
@@ -189,9 +175,9 @@ if __name__ == "__main__":
     print("Solving maze:")
     print(maze_string)
 
-
     maze_ga = MazeGa(maze_string, 
-                    use_custom_functions=settings["use_custom_functions"], 
+                    custom_mutation=settings["custom_mutation"],
+                    custom_crossover=settings["custom_crossover"], 
                     valid_only=settings["valid_only"], 
                     show_each_n=settings["show_each_n"], 
                     wait_on_show=settings["wait_on_show"], 
