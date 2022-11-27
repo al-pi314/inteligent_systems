@@ -1,66 +1,77 @@
-import itertools
-import os.path
+from itertools import product
+from os import path, listdir, makedirs
 from multiprocessing import Pool
-from random import seed, random
 from collections import OrderedDict
-import sys
-import hashlib
-import json
+from hashlib import md5
 import pandas as pd
 from maze_ga import MazeGa
 from numpy import linspace
-import time
 
-OVERWRITE_ON_CHANGE = False
-SAVE_FREQUENCY = 1
-SOLVING_CHUNK_SIZE = 1
-MAX_PROCESSES = 10
+SAVE_FREQUENCY = 3
+SOLVING_CHUNK_SIZE = 100
+MAX_PROCESSES = 15
 
 class Storage():
-    def __init__(self, run_file, generation_file, settings_file, save_frequency=1):
-        self.run_file = run_file
-        self.generation_file = generation_file
+    def __init__(self, runs_dir, generations_dir, settings_file, runs_schema, runs_index, generations_schema, generations_index, save_frequency=1):
+        self.runs_dir = runs_dir
+        self.generations_dir = generations_dir
         self.settings_file = settings_file
-        self.last_run_id = -1
+
+        makedirs(self.runs_dir, exist_ok=True)
+        makedirs(self.generations_dir, exist_ok=True)
+
+        self.saves = 0
+
         self.save_frequency = save_frequency
         self.save_requests = 0
+
+        self.runs_schema = runs_schema
+        self.runs_index = runs_index
+        self.generations_schema = generations_schema
+        self.generations_index = generations_index
+
+        self.run_df = None
+        self.generation_df = None
+
         self.settings_hash = ""
+        self.last_run_id = -1
 
-    def load_header(self):
-        self.run_df = pd.read_parquet(self.run_file, engine='fastparquet')
-        self.generation_df = pd.read_parquet(self.generation_file, engine='fastparquet')
-
-    def set_header(self, runs_header, generations_header):
-        self.run_df = pd.DataFrame(columns=runs_header)
-        self.generation_df = pd.DataFrame(columns=generations_header)
-        self.store_runs(append=False)
-        self.store_generations(append=False)
-
-    def check_header(self, runs_header, generations_header):
-        if not self.storage_ok():
-            self.set_header(runs_header, generations_header)
-        else:
-            self.load_header()
-            if not set(runs_header) == set(self.run_df.columns):
-                raise ValueError('Run header does not match')
-            if not set(generations_header) == set(self.generation_df.columns):
-                raise ValueError('Generation header does not match')
+    def load_from_disk(self, settings_hash):
+        ids = self.save_ids()
+        if path.isfile(self.settings_file):
+            sh, lri = self.load_settings()
+            schema_valid, run_ids = self.read_schema()
+            if sh == settings_hash and schema_valid:
+                self.saves = max(ids) +1
+                self.settings_hash = sh
+                self.last_run_id = lri
+                print("continue from last run")
+            else:
+                if sh != settings_hash:
+                    print("settings changed")
+                else:
+                    print("schema changed")
+                self.saves = 0
+                self.settings_hash = settings_hash
+                self.last_run_id = -1
+                return set(), set()
+            return ids, run_ids
         
-    def storage_ok(self):
-        return os.path.isfile(self.run_file) and os.path.isfile(self.generation_file) and os.path.isfile(self.settings_file)
-    
-    def set_settings_hash(self, settings_hash):
-        self.settings_hash = settings_hash
+        print("start new run")
+        self.update_settings()
+        return ids, run_ids 
+        
+    def file_path(self, file_dir):
+        return path.join(file_dir, f'file_{self.saves}.parquet')
 
     def load_settings(self):
+        sh, lri = "", -1
         with open(self.settings_file, 'r') as f:
-            try:
-                self.settings_hash = f.readline().strip("\n")
-                run_id = f.readline().strip("\n")
-                if run_id != "":
-                    self.last_run_id = int(run_id)
-            except ValueError:
-                pass
+            settings = [l.strip("\n") for l in f.readlines()]
+            if len(settings) >= 2:
+                sh = settings[0]
+                lri = int(settings[1])
+        return sh, lri
 
     def update_settings(self):
         with open(self.settings_file, 'w') as f:
@@ -68,44 +79,87 @@ class Storage():
             f.write("\n")
             f.write(str(self.last_run_id))
             f.write("\n")
-    
-    def store_runs(self, append=True):
-        self.last_run_id = self.run_df["run_id"].max()
+
+    def read_schema(self):
+        run_df = pd.read_parquet(self.runs_dir, engine='pyarrow')
+        generation_df = pd.read_parquet(self.generations_dir, engine='pyarrow')
+
+        run_ids = set(run_df.index)
+
+        must_be_equal = [(run_df.columns, self.runs_schema), (generation_df.columns, self.generations_schema), (run_df.index.names, self.runs_index), (generation_df.index.names, self.generations_index)]
+        print([set(a) - set(b) for a, b in must_be_equal])
+        print([set(b) - set(a) for a, b in must_be_equal])
+        return all([set(a) == set(b) for a, b in must_be_equal]), run_ids
+
+    def save_ids(self):
+        ids = set()
+        for filename in listdir(self.runs_dir):
+            if filename.endswith(".parquet"):
+                save_id = int(filename.split("_")[1].split(".")[0])
+                ids.add(save_id)
+        return ids
+
+    def store_to_df(self, run_df, generation_df):
+        if self.run_df is None:
+            self.run_df = run_df
+        else:
+            self.run_df = pd.concat([self.run_df, run_df])
+
+        if self.generation_df is None:
+            self.generation_df = generation_df
+        else:
+            self.generation_df = pd.concat([self.generation_df, generation_df])
+        print("stored to DF")
+
+    def store_to_disk(self):
+        self.generation_df.to_parquet(self.file_path(self.generations_dir), engine='pyarrow', compression='gzip', index=True)
+        self.run_df.to_parquet(self.file_path(self.runs_dir), engine='pyarrow', compression='gzip', index=True)
+        
         self.update_settings()
-        self.run_df.to_parquet(self.run_file, engine='pyarrow', compression='gzip', append=append)
-    
-    def store_generations(self, append=True):
-        self.generation_df.to_parquet(self.generation_file, engine='pyarrow', compression='gzip', append=append)
 
-    def concat_runs(self, run_result):
-        run_result_df = pd.DataFrame(run_result, index=[0])
-        self.run_df = pd.concat([self.run_df, run_result_df], ignore_index=True)
-
-    def concat_generations(self, generation_result):
-        generation_result_df = pd.DataFrame(generation_result)
-        self.generation_df = pd.concat([self.generation_df, generation_result_df], ignore_index=True)
+        self.run_df = None
+        self.generation_df = None
+        self.saves += 1
+        print("stored to DISK")
         
     def save(self, results):
+        runs_dicts = []
+        generations_dicts = []
         for parameters, solutions in results:
             # Store run to datraframe
-            self.concat_runs(parameters)
+            runs_dicts.append(parameters)
+
             # Store each generation to dataframe
             for i in range(len(solutions)):
                 solution_fitness, solution_path = solutions[i]
                 generation_result = {
                     "run_id": parameters["run_id"],
+                    "start_time": None,
+                    "end_time": None,
                     "generation": i,
                     "fitness": solution_fitness,
-                    "path": solution_path
+                    "solution": ''.join(map(str, solution_path)),
                 }
-                self.concat_generations(generation_result)
+                generations_dicts.append(generation_result)
+
+            # update last run id
+            if parameters["run_id"] > self.last_run_id:
+                self.last_run_id = parameters["run_id"]
+        
+        # store to dataframe
+        run_df = pd.DataFrame(runs_dicts)
+        run_df.set_index(self.runs_index, inplace=True)
+
+        generation_df = pd.DataFrame(generations_dicts)
+        generation_df.set_index(self.generations_index, inplace=True)
+
+        self.store_to_df(run_df, generation_df)
             
-            # Save to disk if save frequency is reached
-            self.save_requests += 1
-            if self.save_requests >= self.save_frequency:
-                self.store_runs()
-                self.store_generations()
-                self.save_requests = 0
+        # Save to disk if save frequency is reached
+        self.save_requests += 1
+        if self.save_requests >= self.save_frequency:
+            self.store_to_disk()
+            self.save_requests = 0
         
 
 class Analysis():
@@ -113,7 +167,7 @@ class Analysis():
         "maze_file": ["maze_1.txt", "maze_2.txt", "maze_3.txt", "maze_4.txt", "maze_5.txt", "maze_treasure_2.txt", "maze_treasure_3.txt", "maze_treasure_4.txt", "maze_treasure_5.txt"],
         "generations": [300],
         "valid_only": [True, False],
-        "population_size": list(range(50, 500, 50)),
+        "population_size": list(range(50, 550, 50)),
         "parents": linspace(0.01, 0.25, 5),
         "mutation_probability": linspace(0.01, 0.1, 5),
         "elitism": linspace(0.01, 0.05, 5),
@@ -125,26 +179,26 @@ class Analysis():
     def load_mazes(self, maze_dir):
         self.mazes = {}
         for maze_file in self.parameters["maze_file"]:
-            with open(os.path.join(maze_dir, maze_file), "r") as f:
+            with open(path.join(maze_dir, maze_file), "r") as f:
                 self.mazes[maze_file] = f.read()
     
     def combinations(self):
-        named_parameter_cominations = [dict(zip(self.parameters.keys(), values)) for values in itertools.product(*self.parameters.values())]
+        named_parameter_cominations = [dict(zip(self.parameters.keys(), values)) for values in product(*self.parameters.values())]
         print("Number of combinations: {}".format(len(named_parameter_cominations)))
         print("Example combination: {}".format(named_parameter_cominations[0]))
         return named_parameter_cominations
     
     def parameters_hash(self):
-        dhash = hashlib.md5()
+        dhash = md5()
         for key, value in self.parameters.items():
             dhash.update(str(key).encode('utf-8'))
             dhash.update(str(value).encode('utf-8'))
         return dhash.hexdigest()
    
-def execute_combination(run_id, parameters):
+def execute_combination(run_id, parameters, maze_string):
     # extract maze file path and load it
     maze_ga = MazeGa(
-        parameters["maze_file"], 
+        maze_string, 
         custom_mutation=parameters["custom_mutation"],
         custom_crossover=parameters["custom_crossover"], 
         valid_only=parameters["valid_only"], 
@@ -163,59 +217,47 @@ def execute_combination(run_id, parameters):
 
     solutions = list(zip(solutions_fintness, best_solutions))
     parameters["run_id"] = run_id
+    parameters["start_time"] = None
+    parameters["end_time"] = None
 
     print(run_id, "finished")
     return parameters, solutions
 
 if __name__ == "__main__":
-    # read args
-    if len(sys.argv) > 1:
-        OVERWRITE_ON_CHANGE = sys.argv[1] == "-ns"
-
-    # set random seed
-    seed(100)
-
-    # expected header of runs file
-    runs_header = ["run_id", "start_time", "end_time", "maze_file", "valid_only", "population_size", "parents", "mutation_probability", "elitism", "custom_mutation", "custom_crossover"]
-    # expected header of generations file
-    generations_header = ["run_id", "start_time", "end_time", "generation", "fitness", "solution"]
-
-    # storage
-    storage = Storage("./analysis/runs.parquet .", "./analysis/generations.parquet .", "./analysis/settings.txt", save_frequency=SAVE_FREQUENCY)
-    storage.check_header(runs_header, generations_header)
-    storage.load_settings()
+    # expected schema of runs file
+    runs_schema = ["start_time", "end_time", "maze_file", "generations", "valid_only", "population_size", "parents", "mutation_probability", "elitism", "custom_mutation", "custom_crossover"]
+    runs_index = ["run_id"]
+    # expected schema of generations file
+    generations_schema = ["start_time", "end_time", "fitness", "solution"]
+    generations_index = ["run_id", "generation"]
 
     # analysis parameters
     analysis = Analysis()
     analysis.load_mazes("./mazes")
     combinations = analysis.combinations()
-    settings_hash = analysis.parameters_hash()
 
-    # check if settings have changed
-    if storage.settings_hash != settings_hash:
-        print("Settings have changed")
-        if OVERWRITE_ON_CHANGE:
-            print("Overwriting old settings and data (10s)")
-            time.sleep(10)
-            storage.set_header(runs_header, generations_header)
-            storage.set_settings_hash(settings_hash)
-            storage.update_settings()
-        else:
-            exit(1)
+    # storage
+    storage = Storage("./analysis/test_run/runs", "./analysis/test_run/generations", "./analysis/test_run/settings.txt", 
+        runs_schema, runs_index, generations_schema, generations_index, 
+        save_frequency=SAVE_FREQUENCY)
+
+    # load previous runs
+    save_ids, run_ids = storage.load_from_disk(analysis.parameters_hash())
 
     # display data about last run and remaining combinations
     print("Last run id: {}".format(storage.last_run_id))
-    enumerated_combinations = list(enumerate(combinations))
-    combinations = enumerated_combinations[storage.last_run_id+1:]
+    combinations = [(i, combination, analysis.mazes[combination["maze_file"]]) for i, combination in enumerate(combinations) if i not in run_ids]
     print("Number of combinations to execute: {}".format(len(combinations)))
+
+    # wait for user input
+    print("VALIDATE ALL SETTINGS ... PRESS ANY KEY TO CONTINUTE")
+    input()
+    print("starting ...")
 
     # start thread pool
     with Pool(processes=MAX_PROCESSES) as pool:
         for i in range(0, len(combinations), SOLVING_CHUNK_SIZE):
             solving_chunk = combinations[i:i + SOLVING_CHUNK_SIZE]
-            # convert maze names to maze content
-            for i in range(len(solving_chunk)):
-                solving_chunk[i][1]["maze_file"] = analysis.mazes[solving_chunk[i][1]["maze_file"]]
             # evaluate chunk
             results = pool.starmap(execute_combination, solving_chunk)
             storage.save(results)
