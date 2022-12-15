@@ -4,9 +4,6 @@
 # python cache
 *.pyc
 
-# analysis data
-*.csv
-
 # temp files
 ~$*
 
