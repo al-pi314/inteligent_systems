@@ -1,12 +1,15 @@
 from classifier import Classifier
-from random import choice
+from random import choices
 
 
 class RandomClassifier(Classifier):
     def __init__(self, dataset, target):
-        super().__init__(dataset)
+        super().__init__(dataset, target)
         
-        self.options = self.dataset[target].unique()
+        self.options = self.target.unique()
     
-    def classify(self, _):
-        return choice(self.options)
+    def _predict(self, samples):
+        return choices(self.options, k=len(samples))
+
+    def _fit(self, features, targets):
+        pass
