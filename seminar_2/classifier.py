@@ -29,46 +29,43 @@ class Classifier(ABC):
         pass
 
     def fit(self, dataset, target):
-        print(self.fillna_method)
         self.dataset, self.target = self.preprocess(dataset, target)
 
         self._fit(self.dataset, self.target)
 
     def predict(self, features):
-        if self.discrete:
-            features = self.discretize(features)
-
-        if self.poly_transformer:
-            features = self.poly_transformer.transform(features)
+        features, _ = self.preprocess(features, None)
 
         return self._predict(features)
 
     def evaluate(self, test_features, test_targets):
-        predictions = self.predict(test_features)
+        predictions = np.array(self.predict(test_features))
+        test_targets = np.array(test_targets.values)
         tp = np.sum((predictions == 1) & (test_targets == 1))
         fp = np.sum((predictions == 1) & (test_targets == 2))
         fn = np.sum((predictions == 2) & (test_targets == 1))
+        tn = np.sum((predictions == 2) & (test_targets == 2))
 
         precision = tp / (tp + fp) if tp + fp != 0 else 0
         recall = tp / (tp + fn) if tp + fn != 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if precision + recall != 0 else 0
         auc = roc_auc_score(test_targets, predictions)
-        return f1, precision, recall, auc
+        accuaracy = (tp + tn) / (tp + tn + fp + fn)
+        return f1, precision, recall, auc, accuaracy
 
 
     def preprocess(self, data, target):
-        print("Preprocessing...")
         if self.discrete:
             data = self.discretize(data)
 
         if self.fillna_method:
-            print("Filling NaNs...")
             data = self.fillna(data)
 
         if self.dropna:
             indicies = data.isna().any(axis=1)
             data = data[~indicies]
-            target = target[~indicies]
+            if target is not None:
+                target = target[~indicies]
 
         if self.outliers_method:
             data = self.replace_outliers(data)

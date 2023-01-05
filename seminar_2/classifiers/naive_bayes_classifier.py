@@ -13,5 +13,4 @@ class NaiveBayesClassifier(Classifier):
         return self.classifier.predict(features)
 
     def _fit(self, features, targets):
-        print("Fitting...")
         self.classifier.fit(features, targets)

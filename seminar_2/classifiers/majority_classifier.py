@@ -10,5 +10,6 @@ class MajorityClassifier(Classifier):
     def _predict(self, samples):
         return [self.majority for _ in range(len(samples))]
 
-    def _fit(self, features, targets):
-        pass
+    def _fit(self, _, targets):
+        self.options = targets.value_counts()
+        self.majority = self.options.index[0]

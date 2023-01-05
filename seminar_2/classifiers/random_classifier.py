@@ -11,5 +11,5 @@ class RandomClassifier(Classifier):
     def _predict(self, samples):
         return choices(self.options, k=len(samples))
 
-    def _fit(self, features, targets):
-        pass
+    def _fit(self, _, targets):
+        self.options = targets.unique()
