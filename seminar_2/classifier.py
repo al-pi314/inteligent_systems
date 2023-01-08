@@ -5,39 +5,12 @@ import numpy as np
 import pandas as pd
 
 class Classifier(ABC):
-    def __init__(self, dataset, target, discrete=False, N_bins=10, N_unique_values=100, fillna_method=None, dropna=False, outliers_method=None, polinomial=None):
-        self.discrete = discrete
-        self.fillna_method = fillna_method
-        self.dropna = dropna
-        self.outliers_method = outliers_method
+    def __init__(self, dataset, target):
+        self.dataset = dataset
+        self.target = target
 
-        if discrete:
-            self.discretize_init(N_bins, N_unique_values)
-
-        self.poly_transformer = None
-        if polinomial:
-            self.poly_transformer = PolynomialFeatures(polinomial, include_bias=True)
-        
-        self.dataset, self.target = self.preprocess(dataset, target)
-
-    @abstractmethod
-    def _predict(self, features):
-        pass
-
-    @abstractmethod
-    def _fit(self, features, targets):
-        pass
-
-    def fit(self, dataset, target):
-        self.dataset, self.target = self.preprocess(dataset, target)
-
-        self._fit(self.dataset, self.target)
-
-    def predict(self, features):
-        features, _ = self.preprocess(features, None)
-
-        return self._predict(features)
-
+        self.fit(self.dataset, self.target)
+    
     def evaluate(self, test_features, test_targets):
         predictions = np.array(self.predict(test_features))
         test_targets = np.array(test_targets.values)
@@ -53,50 +26,41 @@ class Classifier(ABC):
         accuaracy = (tp + tn) / (tp + tn + fp + fn)
         return f1, precision, recall, auc, accuaracy
 
+    @abstractmethod
+    def _predict(self, features):
+        pass
 
-    def preprocess(self, data, target):
-        if self.discrete:
-            data = self.discretize(data)
+    @abstractmethod
+    def _fit(self, features, targets):
+        pass
 
-        if self.fillna_method:
-            data = self.fillna(data)
+    def fit(self, features, targets):
+        self._fit(features, targets)
 
-        if self.dropna:
-            indicies = data.isna().any(axis=1)
-            data = data[~indicies]
-            if target is not None:
-                target = target[~indicies]
+    def predict(self, features):
+        return self._predict(features)
 
-        if self.outliers_method:
-            data = self.replace_outliers(data)
+    def test(self, data, target, folds=5, repetitions=10):
+        evaluations = 5
+        scores = np.empty((repetitions, evaluations))
+        for j in range(repetitions):
+            folded_data = self.fold(data, k=folds)
+            repetition_score_means = np.zeros(evaluations)
 
-        if self.poly_transformer:
-            data = self.poly_transformer.fit_transform(data)
+            for i in range(folds):
+                train = pd.concat(folded_data[:i] + folded_data[i+1:])
+                test = folded_data[i]
 
-        return data, target
-
-    def discretize_init(self, N_bins, N_unique_values):
-        continuous_columns = [c for c in self.dataset.columns if len(self.dataset[c].unique()) > N_unique_values]
-        self.bins_for_columns = {}
-        for c in continuous_columns:
-            self.bins_for_columns[c] = np.linspace(self.dataset[c].min(), self.dataset[c].max(), N_bins + 1)
-
-    def discretize(self, data):
-        for c, bins_index in self.bins_for_columns.items():
-            data[c] = pd.cut(data[c], bins=bins_index, labels=[i for i in range(len(bins_index) - 1)])
-            data[c] = data[c].astype(float)
-        return data
-
-    def fillna(self, data):
-        data = data.fillna(self.fillna_method(data))
-        return data
-
-    def replace_outliers(self, data):
-        stats = data.describe()
-
-        iqr = stats.loc["75%"] - stats.loc["25%"]
-        lower_bound = stats.loc["25%"] - (1.5 * iqr)
-        upper_bound = stats.loc["75%"] + (1.5 * iqr)
-
-        outliers = (data < lower_bound) | (data > upper_bound)
-        return data.where(~outliers, data.mean(), axis=1, inplace=False)
+                self.fit(train.drop(target, axis=1), train[target])
+                repetition_score_means += np.array(self.evaluate(test.drop(target, axis=1), test[target]))
+            
+            scores[j] = repetition_score_means / folds
+        return scores
+    
+    @staticmethod
+    def fold(data, k=5):
+        data = data.sample(frac=1).reset_index(drop=True)
+        folds = []
+        for i in range(k):
+            folds.append(data.iloc[i*len(data)//k:(i+1)*len(data)//k])
+        return folds
